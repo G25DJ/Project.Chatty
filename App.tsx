@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage, Type, FunctionDeclaration } from '@google/genai';
-import { AssistantState, TranscriptionEntry, MemoryEntry, GroundingSource, AuthUser, UITheme, PersonalityType, UserPreferences, DeviceType, SensorData } from './types';
+import { AssistantState, TranscriptionEntry, MemoryEntry, GroundingSource, AuthUser, UITheme, PersonalityType, UserPreferences, DeviceType, SensorData, GeneratedAsset } from './types';
 import * as audioUtils from './services/audioUtils';
 import VoiceVisualizer from './components/VoiceVisualizer';
 import MemoryBank from './components/MemoryBank';
@@ -8,6 +8,8 @@ import LoginPage from './components/LoginPage';
 import ObservationMode from './components/ObservationMode';
 import ScreenShareMode from './components/ScreenShareMode';
 import HardwareSensors from './components/HardwareSensors';
+import CreationStudio from './components/CreationStudio';
+import GroundingSources from './components/GroundingSources';
 
 const VOICES = [
   { id: 'Charon', name: 'Charon', tone: 'Deep, Bass, Authoritative', gender: 'masculine' },
@@ -50,7 +52,8 @@ const DEFAULT_PREFS: UserPreferences = {
   personality: 'friendly',
   layout: 'right',
   voiceId: VOICES[0].id,
-  assistantName: 'Project Chatty'
+  assistantName: 'Project Chatty',
+  customPersonality: 'You are a highly capable AI assistant.'
 };
 
 const App: React.FC = () => {
@@ -65,6 +68,7 @@ const App: React.FC = () => {
   const [streamingAssistantText, setStreamingAssistantText] = useState('');
   const [memories, setMemories] = useState<MemoryEntry[]>([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isStudioOpen, setIsStudioOpen] = useState(false);
   const [isVisionActive, setIsVisionActive] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
@@ -309,8 +313,16 @@ const App: React.FC = () => {
             if (message.serverContent?.inputTranscription) setStreamingUserText(prev => prev + message.serverContent!.inputTranscription!.text);
             if (message.serverContent?.outputTranscription) setStreamingAssistantText(prev => prev + message.serverContent!.outputTranscription!.text);
             if (message.serverContent?.turnComplete) {
+              // Extract grounding if any
+              const chunks = message.serverContent?.groundingMetadata?.groundingChunks || [];
+              const sources: GroundingSource[] = chunks.map((c: any) => {
+                if (c.web) return { title: c.web.title, uri: c.web.uri };
+                if (c.maps) return { title: c.maps.title, uri: c.maps.uri };
+                return null;
+              }).filter(Boolean) as GroundingSource[];
+
               setStreamingUserText(u => { if (u) addTranscription('user', u); return ''; });
-              setStreamingAssistantText(a => { if (a) { addTranscription('assistant', a); audioUtils.playSuccessSound(outputCtx); } return ''; });
+              setStreamingAssistantText(a => { if (a) { addTranscription('assistant', a, sources); audioUtils.playSuccessSound(outputCtx); } return ''; });
             }
           },
           onerror: (err: any) => {
@@ -391,12 +403,14 @@ const App: React.FC = () => {
 
   if (isScanning) {
     return (
-      <div className="fixed inset-0 bg-[#02020a] flex flex-col items-center justify-center z-[200] animate-fade-in">
+      <div className="fixed inset-0 bg-[#02020a] flex flex-col items-center justify-center z-[200] animate-fade-in overflow-hidden">
+        <div className="absolute inset-0 animate-scan bg-gradient-to-b from-transparent via-blue-500/10 to-transparent pointer-events-none opacity-20"></div>
         <div className="relative w-64 h-64 flex items-center justify-center">
-          <div className={`absolute inset-0 border-4 border-t-${themeData.primary} border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin`}></div>
-          <i className="fas fa-microchip text-4xl text-white/20"></i>
+          <div className={`absolute inset-0 border-4 border-t-${themeData.primary} border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin opacity-40`}></div>
+          <i className="fas fa-microchip text-4xl text-white/20 animate-pulse"></i>
         </div>
         <h2 className="mt-12 text-xl font-black tracking-[0.5em] uppercase text-white mb-2 text-center">Synchronizing Neural Core</h2>
+        <p className="text-[10px] text-gray-600 font-black uppercase tracking-widest animate-pulse">Establishing secure link...</p>
       </div>
     );
   }
@@ -411,7 +425,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <header className="px-6 py-4 lg:px-12 lg:py-8 flex items-center justify-between z-50">
+      <header className="px-6 py-4 lg:px-12 lg:py-8 flex items-center justify-between z-50 glass m-4 rounded-[2rem]">
         <div className="flex items-center gap-4 lg:gap-8">
           <div className="w-12 h-12 lg:w-16 lg:h-16 rounded-[2rem] overflow-hidden border border-white/10 relative">
             {prefs.assistantProfilePic ? <img src={prefs.assistantProfilePic} className="w-full h-full object-cover" alt="AI" /> : <div className="w-full h-full bg-blue-500/10 flex items-center justify-center"><i className="fas fa-atom text-white"></i></div>}
@@ -422,9 +436,14 @@ const App: React.FC = () => {
           </div>
         </div>
         <div className="flex items-center gap-4">
-           {!isMobile && <button onClick={() => setIsSettingsOpen(true)} className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-all"><i className="fas fa-cog"></i></button>}
-           <button onClick={() => setIsMemoryOpen(!isMemoryOpen)} className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${isMemoryOpen ? 'bg-blue-500 text-white' : 'bg-white/5 text-gray-400'}`}><i className="fas fa-brain"></i></button>
-           <button onClick={handleLogout} className="text-gray-600 hover:text-white"><i className="fas fa-sign-out-alt"></i></button>
+           {!isMobile && (
+             <>
+               <button onClick={() => setIsStudioOpen(true)} title="Neural Forge" className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-all text-purple-400"><i className="fas fa-wand-magic-sparkles"></i></button>
+               <button onClick={() => setIsSettingsOpen(true)} title="Settings" className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-all"><i className="fas fa-cog"></i></button>
+             </>
+           )}
+           <button onClick={() => setIsMemoryOpen(!isMemoryOpen)} title="Memory Bank" className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${isMemoryOpen ? 'bg-blue-500 text-white' : 'bg-white/5 text-gray-400'}`}><i className="fas fa-brain"></i></button>
+           <button onClick={handleLogout} className="text-gray-600 hover:text-white px-4"><i className="fas fa-sign-out-alt"></i></button>
         </div>
       </header>
 
@@ -437,7 +456,7 @@ const App: React.FC = () => {
             </div>
           )}
 
-          <div className="flex-1 flex flex-col bg-white/[0.02] rounded-[3rem] border border-white/5 overflow-hidden backdrop-blur-3xl relative min-h-0">
+          <div className="flex-1 flex flex-col glass rounded-[3rem] overflow-hidden relative min-h-0">
             <div className="flex-1 p-6 lg:p-12 overflow-y-auto space-y-6 scrollbar-thin" ref={scrollRef}>
               {transcriptions.length === 0 && (
                 <div className="h-full flex flex-col items-center justify-center opacity-10">
@@ -449,11 +468,25 @@ const App: React.FC = () => {
               {transcriptions.map(e => (
                 <div key={e.id} className={`flex flex-col ${e.sender === 'user' ? 'items-end' : 'items-start'}`}>
                   <div className={`max-w-[85%] px-6 py-4 rounded-[2rem] ${e.sender === 'user' ? `bg-${themeData.primary} text-white` : 'bg-white/5 text-gray-300'}`}>
-                    <p className="text-sm font-medium leading-relaxed">{e.text}</p>
+                    <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap">{e.text}</p>
+                    {e.sources && <GroundingSources sources={e.sources} themePrimary={themeData.primary} />}
                   </div>
+                  <span className="text-[8px] text-gray-600 font-black uppercase tracking-widest mt-2 mx-4">{new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 </div>
               ))}
-              {streamingAssistantText && <div className="text-sm text-white/50 animate-pulse">{streamingAssistantText}</div>}
+              {streamingAssistantText && (
+                <div className="items-start flex flex-col">
+                  <div className="max-w-[85%] px-6 py-4 rounded-[2rem] bg-white/5 text-white/50 animate-pulse font-mono text-xs">
+                    {streamingAssistantText}
+                  </div>
+                </div>
+              )}
+              {state === AssistantState.THINKING && (
+                <div className="flex items-center gap-2 text-[10px] text-blue-400 font-black uppercase tracking-widest px-6">
+                  <i className="fas fa-circle-notch fa-spin"></i>
+                  Processing Logic...
+                </div>
+              )}
             </div>
 
             <div className="p-6 lg:p-10 border-t border-white/5 bg-black/40">
@@ -504,6 +537,18 @@ const App: React.FC = () => {
                            <button key={p} onClick={() => setPrefs(pr => ({ ...pr, personality: p }))} className={`py-4 rounded-xl border-2 transition-all font-black text-[9px] uppercase tracking-widest ${prefs.personality === p ? `bg-blue-500/10 border-blue-500` : 'border-white/5 text-gray-700'}`}>{p}</button>
                          ))}
                       </div>
+                      
+                      {prefs.personality === 'custom' && (
+                        <div className="mt-6 animate-slide-up space-y-4">
+                          <label className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Behavioral Directives</label>
+                          <textarea 
+                            value={prefs.customPersonality} 
+                            onChange={(e) => setPrefs(p => ({ ...p, customPersonality: e.target.value }))}
+                            placeholder="Instruct the assistant on how to think, act, and respond..."
+                            className="w-full h-32 bg-white/5 border border-white/10 rounded-2xl p-4 text-xs font-mono text-gray-300 focus:outline-none focus:border-blue-500/50 resize-none"
+                          />
+                        </div>
+                      )}
                    </div>
                    <div className="p-8 bg-blue-500/5 border border-blue-500/10 rounded-3xl">
                       <p className="text-[10px] text-blue-400 font-black uppercase tracking-widest mb-2 flex items-center gap-2"><i className="fas fa-shield-halved"></i> Security Node</p>
@@ -514,6 +559,16 @@ const App: React.FC = () => {
              <button onClick={() => setIsSettingsOpen(false)} className="mt-12 w-full py-6 bg-white text-black font-black uppercase tracking-widest rounded-full hover:scale-[1.02] transition-transform">Apply Neural Configuration</button>
           </div>
         </div>
+      )}
+
+      {isStudioOpen && (
+        <CreationStudio 
+          onClose={() => setIsStudioOpen(false)} 
+          onAssetGenerated={(asset) => {
+            addTranscription('assistant', `Forged a new ${asset.type}: ${asset.prompt}`);
+          }}
+          themePrimary={themeData.primary}
+        />
       )}
     </div>
   );
