@@ -43,7 +43,7 @@ export interface MemoryEntry {
   timestamp: Date;
 }
 
-// Fix: Added GeneratedAsset interface to resolve missing export error in CreationStudio.tsx
+// Fixed: Added GeneratedAsset interface required by CreationStudio.tsx
 export interface GeneratedAsset {
   id: string;
   type: 'image' | 'video';

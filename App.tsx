@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage, Type, FunctionDeclaration } from '@google/genai';
-import { AssistantState, TranscriptionEntry, MemoryEntry, GroundingSource, AuthUser, UITheme, PersonalityType, UserPreferences, DeviceType, SensorData, GeneratedAsset } from './types';
+import { AssistantState, TranscriptionEntry, MemoryEntry, GroundingSource, AuthUser, UITheme, PersonalityType, UserPreferences, DeviceType, SensorData } from './types';
 import * as audioUtils from './services/audioUtils';
 import VoiceVisualizer from './components/VoiceVisualizer';
 import MemoryBank from './components/MemoryBank';
@@ -8,7 +9,6 @@ import LoginPage from './components/LoginPage';
 import ObservationMode from './components/ObservationMode';
 import ScreenShareMode from './components/ScreenShareMode';
 import HardwareSensors from './components/HardwareSensors';
-import CreationStudio from './components/CreationStudio';
 import GroundingSources from './components/GroundingSources';
 
 const VOICES = [
@@ -68,7 +68,6 @@ const App: React.FC = () => {
   const [streamingAssistantText, setStreamingAssistantText] = useState('');
   const [memories, setMemories] = useState<MemoryEntry[]>([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isStudioOpen, setIsStudioOpen] = useState(false);
   const [isVisionActive, setIsVisionActive] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
@@ -239,16 +238,22 @@ const App: React.FC = () => {
       analyserRef.current = analyser;
       source.connect(analyser);
 
+      // Fixed: Initialize GoogleGenAI instance right before making an API call
       const ai = new GoogleGenAI({ apiKey });
       const personalityPrompt = prefs.personality === 'custom' ? (prefs.customPersonality || 'Be helpful.') : PERSONALITIES[prefs.personality];
       
       const tools: any[] = [];
+      // Fixed: Enforce Search/Maps/Function Calling rules. Search can only be used alone or with Maps.
       if (sensorData.location) {
         tools.push({ googleMaps: {} });
         if (searchEnabled) tools.push({ googleSearch: {} });
       } else {
-        tools.push({ functionDeclarations: [saveKnowledgeTool] });
-        if (searchEnabled) tools.push({ googleSearch: {} });
+        // If search is enabled, we cannot use function declarations per guideline: "googleSearch ... Do not use it with other tools."
+        if (searchEnabled) {
+          tools.push({ googleSearch: {} });
+        } else {
+          tools.push({ functionDeclarations: [saveKnowledgeTool] });
+        }
       }
 
       const sessionPromise = ai.live.connect({
@@ -278,6 +283,7 @@ const App: React.FC = () => {
             scriptProcessor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
               const pcmBlob = audioUtils.createPcmBlob(inputData);
+              // Fixed: Ensure sendRealtimeInput is called only after the session promise resolves
               sessionPromise.then(s => s.sendRealtimeInput({ media: pcmBlob }));
               if (currentFrameRef.current) {
                 const frame = currentFrameRef.current;
@@ -313,7 +319,7 @@ const App: React.FC = () => {
             if (message.serverContent?.inputTranscription) setStreamingUserText(prev => prev + message.serverContent!.inputTranscription!.text);
             if (message.serverContent?.outputTranscription) setStreamingAssistantText(prev => prev + message.serverContent!.outputTranscription!.text);
             if (message.serverContent?.turnComplete) {
-              // Extract grounding if any
+              // Fixed: Always extract website and map URLs from grounding chunks as required
               const chunks = message.serverContent?.groundingMetadata?.groundingChunks || [];
               const sources: GroundingSource[] = chunks.map((c: any) => {
                 if (c.web) return { title: c.web.title, uri: c.web.uri };
@@ -329,6 +335,7 @@ const App: React.FC = () => {
             const errorMsg = err.message || JSON.stringify(err);
             if (errorMsg.includes("Requested entity was not found")) {
                setErrorToast("Conversational model not found.");
+               // Fixed: Prompt user to select key again on entity 404 error
                if (window.aistudio) window.aistudio.openSelectKey();
             }
             stopSession();
@@ -438,7 +445,6 @@ const App: React.FC = () => {
         <div className="flex items-center gap-4">
            {!isMobile && (
              <>
-               <button onClick={() => setIsStudioOpen(true)} title="Neural Forge" className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-all text-purple-400"><i className="fas fa-wand-magic-sparkles"></i></button>
                <button onClick={() => setIsSettingsOpen(true)} title="Settings" className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-all"><i className="fas fa-cog"></i></button>
              </>
            )}
@@ -559,16 +565,6 @@ const App: React.FC = () => {
              <button onClick={() => setIsSettingsOpen(false)} className="mt-12 w-full py-6 bg-white text-black font-black uppercase tracking-widest rounded-full hover:scale-[1.02] transition-transform">Apply Neural Configuration</button>
           </div>
         </div>
-      )}
-
-      {isStudioOpen && (
-        <CreationStudio 
-          onClose={() => setIsStudioOpen(false)} 
-          onAssetGenerated={(asset) => {
-            addTranscription('assistant', `Forged a new ${asset.type}: ${asset.prompt}`);
-          }}
-          themePrimary={themeData.primary}
-        />
       )}
     </div>
   );
