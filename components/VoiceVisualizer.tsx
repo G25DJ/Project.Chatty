@@ -8,32 +8,46 @@ interface VoiceVisualizerProps {
 
 const VoiceVisualizer: React.FC<VoiceVisualizerProps> = ({ state, analyser }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current || !containerRef.current) return;
 
     const canvas = canvasRef.current;
+    const container = containerRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    // Handle initial size and resizing
+    const updateSize = () => {
+      canvas.width = container.clientWidth * window.devicePixelRatio;
+      canvas.height = container.clientHeight * window.devicePixelRatio;
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    };
+    
+    updateSize();
+    const resizeObserver = new ResizeObserver(updateSize);
+    resizeObserver.observe(container);
 
     let animationId: number;
     const bufferLength = analyser?.frequencyBinCount || 128;
     const dataArray = new Uint8Array(bufferLength);
 
     const render = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const width = canvas.width / window.devicePixelRatio;
+      const height = canvas.height / window.devicePixelRatio;
+      ctx.clearRect(0, 0, width, height);
       
-      const width = canvas.width;
-      const height = canvas.height;
       const centerY = height / 2;
       
       if (analyser) {
         analyser.getByteFrequencyData(dataArray);
       }
 
-      const barCount = 40;
-      const barWidth = width / barCount;
-      const gap = 4;
+      // Responsive bar counts
+      const barCount = width < 200 ? 20 : width < 400 ? 40 : 60;
+      const gap = width < 300 ? 2 : 4;
+      const barWidth = (width - (barCount - 1) * gap) / barCount;
 
       for (let i = 0; i < barCount; i++) {
         let barHeight = 4;
@@ -42,7 +56,7 @@ const VoiceVisualizer: React.FC<VoiceVisualizerProps> = ({ state, analyser }) =>
            const dataIndex = Math.floor((i / barCount) * bufferLength);
            barHeight = (dataArray[dataIndex] / 255) * (height / 1.5) + 4;
         } else if (state === AssistantState.CONNECTING) {
-           barHeight = Math.sin(Date.now() / 200 + i * 0.5) * 15 + 20;
+           barHeight = Math.sin(Date.now() / 200 + i * 0.5) * (height / 6) + (height / 5);
         }
 
         const x = i * (barWidth + gap);
@@ -62,9 +76,8 @@ const VoiceVisualizer: React.FC<VoiceVisualizerProps> = ({ state, analyser }) =>
 
         ctx.fillStyle = gradient;
         ctx.beginPath();
-        // Fallback for older browsers if roundRect is missing
         if (ctx.roundRect) {
-            ctx.roundRect(x, y, barWidth, barHeight, 4);
+            ctx.roundRect(x, y, barWidth, barHeight, barWidth / 2);
         } else {
             ctx.rect(x, y, barWidth, barHeight);
         }
@@ -75,16 +88,17 @@ const VoiceVisualizer: React.FC<VoiceVisualizerProps> = ({ state, analyser }) =>
     };
 
     render();
-    return () => cancelAnimationFrame(animationId);
+    return () => {
+      cancelAnimationFrame(animationId);
+      resizeObserver.disconnect();
+    };
   }, [state, analyser]);
 
   return (
-    <div className="w-full h-32 flex items-center justify-center">
+    <div ref={containerRef} className="w-full h-24 lg:h-32 flex items-center justify-center">
       <canvas 
         ref={canvasRef} 
-        width={400} 
-        height={100} 
-        className="w-full max-w-md h-full"
+        className="w-full h-full"
       />
     </div>
   );
