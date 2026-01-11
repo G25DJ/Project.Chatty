@@ -20,10 +20,18 @@
     <style>
         :root {
             --dvh: 100vh;
+            --ui-scale: 1;
         }
         @supports (height: 100dvh) {
             :root { --dvh: 100dvh; }
         }
+
+        /* Device Specific Scaling */
+        html[data-device="wear"] { font-size: 10px; --ui-scale: 0.7; }
+        html[data-device="mobile"] { font-size: 14px; --ui-scale: 0.9; }
+        html[data-device="desktop"] { font-size: 16px; --ui-scale: 1; }
+        html[data-device="auto"] { font-size: 18px; --ui-scale: 1.2; }
+        html[data-device="tv"] { font-size: 22px; --ui-scale: 1.5; }
 
         @keyframes pulse-slow {
             0%, 100% { transform: scale(1); opacity: 0.8; }
@@ -65,6 +73,7 @@
             -webkit-tap-highlight-color: transparent;
             position: fixed;
             font-family: system-ui, -apple-system, sans-serif;
+            transition: font-size 0.5s ease-in-out;
         }
 
         #root {
