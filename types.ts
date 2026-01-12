@@ -1,4 +1,3 @@
-
 export enum AssistantState {
   IDLE = 'IDLE',
   CONNECTING = 'CONNECTING',
@@ -43,7 +42,6 @@ export interface MemoryEntry {
   timestamp: Date;
 }
 
-// Fixed: Added GeneratedAsset interface required by CreationStudio.tsx
 export interface GeneratedAsset {
   id: string;
   type: 'image' | 'video';
@@ -59,7 +57,8 @@ export interface UserPreferences {
   layout: 'left' | 'right';
   voiceId: string;
   assistantName: string;
-  assistantProfilePic?: string; 
+  assistantProfilePic?: string;
+  modality: 'masculine' | 'feminine';
 }
 
 export interface AuthUser {

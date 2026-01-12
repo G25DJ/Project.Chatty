@@ -17,6 +17,8 @@ interface SettingsModalProps {
   personalities: Record<PersonalityType, string>;
   isTV: boolean;
   isWearable: boolean;
+  onPreviewVoice?: (voiceId: string) => void;
+  previewingVoiceId?: string | null;
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -28,6 +30,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   personalities,
   isTV,
   isWearable,
+  onPreviewVoice,
+  previewingVoiceId,
 }) => {
   if (!isOpen) return null;
 
@@ -38,7 +42,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
           <i className="fas fa-times"></i>
         </button>
         <h2 className={`${isTV ? 'text-6xl' : 'text-4xl'} font-black tracking-tighter uppercase mb-12`}>Configuration</h2>
-        <div className={`grid grid-cols-1 ${isWearable ? '' : 'md:grid-cols-2'} gap-8 lg:gap-12`}>
+        <div className={`grid grid-cols-1 ${isWearable ? '' : 'lg:grid-cols-2'} gap-8 lg:gap-12`}>
           <section className="space-y-8 lg:space-y-12">
             <div className="space-y-4">
               <label className="text-[10px] font-black text-gray-600 uppercase tracking-widest">Assistant Designation</label>
@@ -49,32 +53,49 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 font-black text-xl" 
               />
             </div>
-            <div className="space-y-8">
-              <label className="text-[10px] font-black text-gray-600 uppercase tracking-widest block mb-4">Neural Profile</label>
-              <div className="grid grid-cols-1 gap-3">
+            <div className="space-y-4">
+              <label className="text-[10px] font-black text-gray-600 uppercase tracking-widest block mb-4">Chatty Profile</label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {voices.map(v => (
-                  <button 
+                  <div 
                     key={v.id} 
-                    onClick={() => setPrefs(pr => ({ ...pr, voiceId: v.id }))} 
-                    className={`flex items-center justify-between px-6 py-4 rounded-2xl border-2 transition-all group ${prefs.voiceId === v.id ? 'bg-blue-500/10 border-blue-500' : 'bg-white/5 border-white/5 hover:border-white/10'}`}
+                    className={`flex items-center justify-between px-4 py-3 rounded-2xl border-2 transition-all group ${prefs.voiceId === v.id ? 'bg-blue-500/10 border-blue-500' : 'bg-white/5 border-white/5 hover:border-white/10'}`}
                   >
-                    <div className="flex items-center gap-4 text-left">
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${v.gender === 'masculine' ? 'bg-blue-900/20 text-blue-500' : 'bg-emerald-900/20 text-emerald-500'}`}>
-                        <i className={`fas ${v.gender === 'masculine' ? 'fa-mars' : 'fa-venus'}`}></i>
+                    <button 
+                      onClick={() => setPrefs(pr => ({ ...pr, voiceId: v.id }))} 
+                      className="flex items-center gap-3 text-left flex-1"
+                    >
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${v.gender === 'masculine' ? 'bg-blue-900/20 text-blue-500' : 'bg-emerald-900/20 text-emerald-500'}`}>
+                        <i className={`fas ${v.gender === 'masculine' ? 'fa-mars' : 'fa-venus'} text-xs`}></i>
                       </div>
-                      <div>
-                        <p className={`text-sm font-black uppercase tracking-widest ${prefs.voiceId === v.id ? 'text-white' : 'text-gray-400'}`}>{v.name}</p>
+                      <div className="overflow-hidden">
+                        <p className={`text-xs font-black uppercase tracking-widest truncate ${prefs.voiceId === v.id ? 'text-white' : 'text-gray-400'}`}>{v.name}</p>
+                        <p className="text-[8px] text-gray-600 truncate">{v.tone}</p>
                       </div>
+                    </button>
+                    
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); onPreviewVoice?.(v.id); }}
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${previewingVoiceId === v.id ? 'bg-blue-500 text-white animate-pulse' : 'bg-white/5 text-gray-600 hover:text-white hover:bg-white/10'}`}
+                        title="Chatty Preview"
+                      >
+                        {previewingVoiceId === v.id ? (
+                          <i className="fas fa-circle-notch fa-spin text-[10px]"></i>
+                        ) : (
+                          <i className="fas fa-volume-up text-[10px]"></i>
+                        )}
+                      </button>
+                      {prefs.voiceId === v.id && <i className="fas fa-check-circle text-blue-500 text-xs"></i>}
                     </div>
-                    {prefs.voiceId === v.id && <i className="fas fa-check-circle text-blue-500"></i>}
-                  </button>
+                  </div>
                 ))}
               </div>
             </div>
           </section>
           <section className="space-y-8 lg:space-y-12">
             <div className="space-y-4">
-              <label className="text-[10px] font-black text-gray-600 uppercase tracking-widest">Neural Persona</label>
+              <label className="text-[10px] font-black text-gray-600 uppercase tracking-widest">Chatty Persona</label>
               <div className="grid grid-cols-2 gap-3">
                 {(Object.keys(personalities) as PersonalityType[]).map(p => (
                   <button 
@@ -105,7 +126,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                   <i className="fas fa-shield-halved"></i> Security Node
                 </p>
                 <p className="text-xs text-gray-500 leading-relaxed">
-                  Optic and audio uplinks require explicit user activation to ensure privacy standards. Configuration changes propagate across the neural segment instantly.
+                  Optic and audio uplinks require explicit user activation to ensure privacy standards. Configuration changes propagate across the chatty segment instantly.
                 </p>
               </div>
             )}
@@ -115,7 +136,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
           onClick={onClose} 
           className="mt-12 w-full py-6 bg-white text-black font-black uppercase tracking-widest rounded-full hover:scale-[1.02] transition-transform"
         >
-          Apply Neural Configuration
+          Apply Chatty Configuration
         </button>
       </div>
     </div>

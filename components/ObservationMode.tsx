@@ -1,4 +1,3 @@
-
 import React, { useRef, useEffect, useState } from 'react';
 
 interface ObservationModeProps {
@@ -90,7 +89,7 @@ const ObservationMode: React.FC<ObservationModeProps> = ({ isActive, onFrame }) 
       {/* Canvas for processing */}
       <canvas ref={canvasRef} className="hidden" />
       
-      {/* Scanning/Neural Aesthetic Overlay */}
+      {/* Scanning/Chatty Aesthetic Overlay */}
       <div className="absolute inset-0 pointer-events-none border-[1px] border-white/5 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.4)_100%)]"></div>
       
       {/* Low Light Overlay */}

@@ -1,4 +1,3 @@
-
 import { Blob as GeminiBlob } from '@google/genai';
 
 export function decode(base64: string): Uint8Array {
@@ -51,7 +50,7 @@ export function createPcmBlob(data: Float32Array): GeminiBlob {
   };
 }
 
-// Neural UI Sounds
+// Chatty UI Sounds
 export function playLinkSound(ctx: AudioContext) {
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();

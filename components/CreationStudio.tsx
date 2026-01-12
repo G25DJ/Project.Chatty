@@ -28,7 +28,7 @@ const CreationStudio: React.FC<CreationStudioProps> = ({ onClose, onAssetGenerat
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
     setIsGenerating(true);
-    setStatusMessage('Initializing neural link...');
+    setStatusMessage('Initializing chatty link...');
 
     try {
       await checkApiKey();

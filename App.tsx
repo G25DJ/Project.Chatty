@@ -10,14 +10,7 @@ import ScreenShareMode from './components/ScreenShareMode';
 import HardwareSensors from './components/HardwareSensors';
 import GroundingSources from './components/GroundingSources';
 import SettingsModal from './components/SettingsModal';
-
-const VOICES = [
-  { id: 'Charon', name: 'Charon', tone: 'Deep, Bass, Authoritative', gender: 'masculine' },
-  { id: 'Puck', name: 'Puck', tone: 'Energetic, Bright, Playful', gender: 'masculine' },
-  { id: 'Fenrir', name: 'Fenrir', tone: 'Vibrant, Sharp, Focused', gender: 'masculine' },
-  { id: 'Kore', name: 'Kore', tone: 'Clear, Professional, Calm', gender: 'feminine' },
-  { id: 'Zephyr', name: 'Zephyr', tone: 'Warm, Smooth, Melodic', gender: 'feminine' }
-];
+import IntroSequence from './components/IntroSequence';
 
 const THEMES: Record<UITheme, { primary: string; secondary: string; glow: string; bg: string }> = {
   cosmic: { primary: 'blue-500', secondary: 'indigo-500', glow: 'rgba(59,130,246,0.5)', bg: '#02020a' },
@@ -51,12 +44,14 @@ const DEFAULT_PREFS: UserPreferences = {
   theme: 'cosmic',
   personality: 'friendly',
   layout: 'right',
-  voiceId: VOICES[0].id,
+  voiceId: 'Charon',
   assistantName: 'Project Chatty',
-  customPersonality: 'You are a highly capable AI assistant.'
+  customPersonality: 'You are a highly capable AI assistant.',
+  modality: 'masculine'
 };
 
 const App: React.FC = () => {
+  const [showIntro, setShowIntro] = useState(true);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [prefs, setPrefs] = useState<UserPreferences>(DEFAULT_PREFS);
   const [state, setState] = useState<AssistantState>(AssistantState.IDLE);
@@ -75,6 +70,7 @@ const App: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [searchEnabled, setSearchEnabled] = useState(true);
   const [errorToast, setErrorToast] = useState<string | null>(null);
+  const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
 
   const audioContextRef = useRef<{ input: AudioContext; output: AudioContext } | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -85,6 +81,32 @@ const App: React.FC = () => {
   const sessionRef = useRef<any>(null);
   const currentFrameRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const dynamicVoices = useMemo(() => {
+    const isFem = prefs.modality === 'feminine';
+    if (isFem) {
+      return [
+        { id: 'Zephyr', name: 'Gabby', tone: 'Warm, Smooth, Melodic', gender: 'feminine' },
+        { id: 'Kore', name: 'Paula', tone: 'Clear, Professional, Calm', gender: 'feminine' },
+        { id: 'Aoede', name: 'Kai', tone: 'Poetic, Soulful, Expressive', gender: 'feminine' },
+        { id: 'Leda', name: 'Jessie', tone: 'Bright, Airy, Gentle', gender: 'feminine' }
+      ];
+    } else {
+      return [
+        { id: 'Charon', name: 'John', tone: 'Deep, Bass, Authoritative', gender: 'masculine' },
+        { id: 'Puck', name: 'Caleb', tone: 'Energetic, Bright, Playful', gender: 'masculine' },
+        { id: 'Fenrir', name: 'Able', tone: 'Vibrant, Sharp, Focused', gender: 'masculine' },
+        { id: 'Charon', name: 'Jake', tone: 'Deep, Resonant, Command', gender: 'masculine' }
+      ];
+    }
+  }, [prefs.modality]);
+
+  useEffect(() => {
+    const isValid = dynamicVoices.some(v => v.id === prefs.voiceId);
+    if (!isValid && dynamicVoices.length > 0) {
+      setPrefs(p => ({ ...p, voiceId: dynamicVoices[0].id }));
+    }
+  }, [dynamicVoices, prefs.voiceId]);
 
   const detectHardware = useCallback(async () => {
     try {
@@ -236,11 +258,65 @@ const App: React.FC = () => {
     return result;
   };
 
+  const handlePreviewVoice = async (voiceId: string) => {
+    if (previewingVoiceId) return;
+    try {
+      setPreviewingVoiceId(voiceId);
+      const apiKey = process.env.API_KEY;
+      if (!apiKey) throw new Error("API Key required for voice synthesis.");
+
+      if (!audioContextRef.current) {
+        audioContextRef.current = {
+          input: new (window.AudioContext || (window as any).webkitAudioContext)(),
+          output: new (window.AudioContext || (window as any).webkitAudioContext)()
+        };
+      }
+      const outputCtx = audioContextRef.current.output;
+      if (outputCtx.state === 'suspended') await outputCtx.resume();
+
+      const ai = new GoogleGenAI({ apiKey });
+      const voice = dynamicVoices.find(v => v.id === voiceId);
+      const prompt = `Say: Hello, I am ${voice?.name}. I am your chatty voice profile.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-preview-tts",
+        contents: [{ parts: [{ text: prompt }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: voiceId },
+            },
+          },
+        },
+      });
+
+      const audioPart = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+      if (audioPart?.inlineData?.data) {
+        const audioBuffer = await audioUtils.decodeAudioData(
+          audioUtils.decode(audioPart.inlineData.data),
+          outputCtx,
+          24000,
+          1
+        );
+        const source = outputCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(outputCtx.destination);
+        source.onended = () => setPreviewingVoiceId(null);
+        source.start(0);
+      } else {
+        setPreviewingVoiceId(null);
+      }
+    } catch (err: any) {
+      setPreviewingVoiceId(null);
+    }
+  };
+
   const startSession = async (initialText?: string) => {
     try {
       setState(AssistantState.CONNECTING);
       const apiKey = process.env.API_KEY;
-      if (!apiKey) throw new Error("API Authentication failure: Key is not provided.");
+      if (!apiKey) throw new Error("API Authentication failure.");
 
       if (!audioContextRef.current) {
         audioContextRef.current = {
@@ -255,14 +331,7 @@ const App: React.FC = () => {
       audioUtils.playLinkSound(outputCtx);
 
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: { 
-          echoCancellation: true, 
-          noiseSuppression: true,
-          sampleRate: 16000,
-          channelCount: 1
-        } 
-      }).catch((e) => {
-        throw new Error("Microphone link blocked: " + e.message);
+        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000, channelCount: 1 } 
       });
       micStreamRef.current = stream;
       
@@ -276,16 +345,9 @@ const App: React.FC = () => {
       const personalityPrompt = prefs.personality === 'custom' ? (prefs.customPersonality || 'Be helpful.') : PERSONALITIES[prefs.personality];
       
       const tools: any[] = [];
-      if (sensorData.location) {
-        tools.push({ googleMaps: {} });
-        if (searchEnabled) tools.push({ googleSearch: {} });
-      } else {
-        if (searchEnabled) {
-          tools.push({ googleSearch: {} });
-        } else {
-          tools.push({ functionDeclarations: [saveKnowledgeTool] });
-        }
-      }
+      if (sensorData.location) tools.push({ googleMaps: {} });
+      if (searchEnabled) tools.push({ googleSearch: {} });
+      if (!searchEnabled && !sensorData.location) tools.push({ functionDeclarations: [saveKnowledgeTool] });
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
@@ -293,12 +355,7 @@ const App: React.FC = () => {
           responseModalities: [Modality.AUDIO],
           tools,
           toolConfig: sensorData.location ? {
-            retrievalConfig: {
-              latLng: {
-                latitude: sensorData.location.lat,
-                longitude: sensorData.location.lng,
-              }
-            }
+            retrievalConfig: { latLng: { latitude: sensorData.location.lat, longitude: sensorData.location.lng } }
           } : undefined,
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: prefs.voiceId } } },
           systemInstruction: `Identity: ${prefs.assistantName}. Platform: ${device}. Personality: ${personalityPrompt}.`,
@@ -315,7 +372,6 @@ const App: React.FC = () => {
               const inputData = e.inputBuffer.getChannelData(0);
               const resampledData = downsample(inputData, inputCtx.sampleRate, 16000);
               const pcmBlob = audioUtils.createPcmBlob(resampledData);
-              
               sessionPromise.then(s => s.sendRealtimeInput({ media: pcmBlob }));
               if (currentFrameRef.current) {
                 const frame = currentFrameRef.current;
@@ -364,24 +420,13 @@ const App: React.FC = () => {
               setStreamingAssistantText(a => { if (a) { addTranscription('assistant', a, sources); audioUtils.playSuccessSound(outputCtx); } return ''; });
             }
           },
-          onerror: (err: any) => {
-            const errorMsg = err.message || JSON.stringify(err);
-            if (errorMsg.includes("Requested entity was not found")) {
-               setErrorToast("Conversational model not found.");
-               if (window.aistudio) window.aistudio.openSelectKey();
-            }
-            stopSession();
-          },
+          onerror: (err: any) => stopSession(),
           onclose: () => stopSession()
         }
       });
       sessionRef.current = await sessionPromise;
     } catch (err: any) { 
-      const errorMsg = err.message || JSON.stringify(err);
-      if (errorMsg.includes("Requested entity was not found")) {
-        if (window.aistudio) await window.aistudio.openSelectKey();
-      }
-      setErrorToast(errorMsg);
+      setErrorToast(err.message);
       setState(AssistantState.IDLE); 
       setTimeout(() => setErrorToast(null), 5000);
     }
@@ -393,10 +438,7 @@ const App: React.FC = () => {
       if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); setScreenStream(null); }
     } else {
       try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true }).catch((err) => {
-          if (err.name === 'NotAllowedError') throw new Error("Screen capture authorization denied.");
-          throw err;
-        });
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
         setScreenStream(stream);
         setIsVisionActive(false);
         setIsScreenSharing(true);
@@ -404,7 +446,6 @@ const App: React.FC = () => {
         stream.getVideoTracks()[0].onended = () => { setIsScreenSharing(false); setScreenStream(null); };
       } catch (err: any) {
         setErrorToast(err.message);
-        setTimeout(() => setErrorToast(null), 4000);
       }
     }
   };
@@ -419,8 +460,7 @@ const App: React.FC = () => {
         setIsVisionActive(true);
         if (state === AssistantState.IDLE) startSession();
       } catch (err: any) {
-        setErrorToast("Primary optic access denied.");
-        setTimeout(() => setErrorToast(null), 4000);
+        setErrorToast("Optic access denied.");
       }
     }
   };
@@ -438,177 +478,123 @@ const App: React.FC = () => {
     }
   };
 
+  if (showIntro) return <IntroSequence onComplete={() => setShowIntro(false)} />;
   if (!user) return <LoginPage onLogin={handleLogin} />;
 
   if (isScanning) {
     return (
-      <div className="fixed inset-0 bg-[#02020a] flex flex-col items-center justify-center z-[200] animate-fade-in overflow-hidden">
-        <div className="absolute inset-0 animate-scan bg-gradient-to-b from-transparent via-blue-500/10 to-transparent pointer-events-none opacity-20"></div>
-        <div className="relative w-48 h-48 lg:w-64 lg:h-64 flex items-center justify-center">
-          <div className={`absolute inset-0 border-4 border-t-${themeData.primary} border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin opacity-40`}></div>
-          <i className="fas fa-microchip text-4xl text-white/20 animate-pulse"></i>
+      <div className="fixed inset-0 bg-[#02020a] flex flex-col items-center justify-center z-[200] animate-fade-blur-in overflow-hidden">
+        <div className="absolute inset-0 animate-scan-v bg-gradient-to-b from-transparent via-blue-500/20 to-transparent pointer-events-none opacity-40"></div>
+        <div className="relative w-64 h-64 flex items-center justify-center animate-float-3d">
+          <div className="absolute inset-0 border-4 border-t-blue-500 border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin"></div>
+          <div className="absolute inset-4 border-2 border-b-purple-500 border-t-transparent border-r-transparent border-l-transparent rounded-full animate-spin [animation-duration:3s]"></div>
+          <i className="fas fa-atom text-6xl text-white animate-pulse"></i>
         </div>
-        <h2 className="mt-8 lg:mt-12 text-lg lg:text-xl font-black tracking-[0.5em] uppercase text-white mb-2 text-center">Synchronizing Neural Core</h2>
-        <p className="text-[10px] text-gray-600 font-black uppercase tracking-widest animate-pulse">Establishing hardware link...</p>
+        <h2 className="mt-12 text-2xl font-black tracking-[0.5em] uppercase text-white mb-2 text-center animate-slide-up-reveal">Chatty Sync Active</h2>
+        <p className="text-[11px] text-blue-500 font-black uppercase tracking-[0.3em] animate-pulse">Linking Bio-Core...</p>
       </div>
     );
   }
 
-  // --- RENDER LOGIC START ---
-
-  const renderWearableUI = () => (
-    <div className="flex flex-col items-center justify-center h-full w-full p-4 relative overflow-hidden bg-black">
-      <div className="absolute inset-0 border-[4px] border-white/5 rounded-full pointer-events-none"></div>
-      <div className="w-full flex flex-col items-center gap-4 z-10">
-        <div className="w-24 h-24 mb-2">
-          <VoiceVisualizer state={state} analyser={analyserRef.current || undefined} />
-        </div>
-        <button 
-          onClick={state === AssistantState.IDLE ? () => startSession() : stopSession} 
-          className={`w-32 h-32 rounded-full flex flex-col items-center justify-center transition-all ${state === AssistantState.IDLE ? 'bg-white text-black' : 'bg-red-500 text-white animate-pulse'}`}
-        >
-          <i className={`fas ${state === AssistantState.IDLE ? 'fa-microphone text-4xl' : 'fa-square text-4xl'}`}></i>
-          <span className="text-[10px] font-black uppercase tracking-widest mt-2">{state === AssistantState.IDLE ? 'Start' : 'Stop'}</span>
-        </button>
-        <div className="mt-4 flex gap-4">
-           <button onClick={() => setIsSettingsOpen(true)} className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center"><i className="fas fa-cog text-xs"></i></button>
-           <button onClick={handleLogout} className="w-10 h-10 rounded-full bg-red-900/20 text-red-500 flex items-center justify-center"><i className="fas fa-power-off text-xs"></i></button>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderAutoUI = () => (
-    <div className="flex flex-row h-full w-full p-10 bg-[#02020a] gap-10">
-      <div className="flex-1 flex flex-col gap-6">
-        <header className="flex items-center justify-between glass p-8 rounded-[3rem]">
-           <div className="flex items-center gap-6">
-             <div className="w-20 h-20 rounded-full bg-blue-500/10 flex items-center justify-center"><i className="fas fa-atom text-4xl text-white"></i></div>
-             <h1 className="text-4xl font-black text-white">{prefs.assistantName}</h1>
-           </div>
-           <HardwareSensors data={sensorData} deviceType={device} themeColor={themeData.primary} />
-        </header>
-        <div className="flex-1 glass rounded-[3rem] p-8 overflow-y-auto scrollbar-thin" ref={scrollRef}>
-           {transcriptions.length === 0 ? (
-             <div className="h-full flex items-center justify-center opacity-10">
-               <i className="fas fa-car text-[10rem]"></i>
-             </div>
-           ) : (
-             transcriptions.map(e => (
-               <div key={e.id} className={`mb-6 flex ${e.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[80%] p-8 rounded-[3rem] ${e.sender === 'user' ? `bg-${themeData.primary} text-white` : 'bg-white/5 text-gray-200'}`}>
-                    <p className="text-2xl font-bold leading-relaxed">{e.text}</p>
-                  </div>
-               </div>
-             ))
-           )}
-        </div>
-      </div>
-      <div className="w-[300px] flex flex-col gap-6">
-         <div className="flex-1 glass rounded-[3rem] p-10 flex flex-col items-center justify-center gap-10">
-            <VoiceVisualizer state={state} analyser={analyserRef.current || undefined} />
-            <button 
-              onClick={state === AssistantState.IDLE ? () => startSession() : stopSession} 
-              className={`w-full py-10 rounded-[3rem] flex items-center justify-center gap-4 transition-all ${state === AssistantState.IDLE ? 'bg-white text-black text-3xl font-black' : 'bg-red-500 text-white text-3xl font-black animate-pulse'}`}
-            >
-              <i className={`fas ${state === AssistantState.IDLE ? 'fa-microphone' : 'fa-square'}`}></i>
-              {state === AssistantState.IDLE ? 'LISTEN' : 'STOP'}
-            </button>
-         </div>
-         <div className="grid grid-cols-2 gap-4">
-            <button onClick={() => setIsSettingsOpen(true)} className="glass h-24 rounded-3xl flex items-center justify-center text-2xl"><i className="fas fa-cog"></i></button>
-            <button onClick={handleLogout} className="bg-red-900/20 text-red-500 h-24 rounded-3xl flex items-center justify-center text-2xl"><i className="fas fa-sign-out-alt"></i></button>
-         </div>
-      </div>
-    </div>
-  );
-
-  if (isWearable) return renderWearableUI();
-  if (isAuto) return renderAutoUI();
-
   return (
-    <div className={`flex flex-col h-full w-full transition-colors duration-1000 overflow-hidden ${isTV ? 'tv-view' : ''}`} style={{ backgroundColor: themeData.bg }}>
+    <div className="flex flex-col h-full w-full transition-all duration-1000 overflow-hidden" style={{ backgroundColor: themeData.bg }}>
       {errorToast && (
-        <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[300] bg-red-600 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-2xl animate-slide-up flex items-center gap-4">
+        <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[300] bg-red-600/90 backdrop-blur-xl text-white px-8 py-5 rounded-[2rem] font-black uppercase tracking-widest text-[10px] shadow-[0_20px_60px_rgba(220,38,38,0.4)] animate-pop flex items-center gap-4">
           <i className="fas fa-exclamation-triangle"></i>
           {errorToast}
           <button onClick={() => setErrorToast(null)} className="ml-4 opacity-50 hover:opacity-100"><i className="fas fa-times"></i></button>
         </div>
       )}
 
-      {/* Standard / TV Header */}
-      <header className={`${isTV ? 'px-20 py-12 m-8 rounded-[4rem]' : 'px-6 py-4 lg:px-12 lg:py-8 m-4 rounded-[2rem]'} flex items-center justify-between z-50 glass`}>
-        <div className="flex items-center gap-4 lg:gap-8">
-          <div className={`${isTV ? 'w-24 h-24 rounded-[3rem]' : 'w-12 h-12 lg:w-16 lg:h-16 rounded-[2rem]'} overflow-hidden border border-white/10 relative`}>
+      {/* Header */}
+      <header className={`${isTV ? 'px-20 py-12 m-8 rounded-[4rem]' : 'px-6 py-4 lg:px-12 lg:py-6 m-4 rounded-[2.5rem]'} flex items-center justify-between z-50 glass animate-fade-blur-in`}>
+        <div className="flex items-center gap-4 lg:gap-8 group">
+          <div className={`${isTV ? 'w-24 h-24 rounded-[3rem]' : 'w-12 h-12 lg:w-16 lg:h-16 rounded-[2rem]'} overflow-hidden border border-white/10 relative transition-all duration-700 group-hover:scale-110 group-hover:rotate-3 shadow-xl group-hover:shadow-blue-500/20`}>
             {prefs.assistantProfilePic ? <img src={prefs.assistantProfilePic} className="w-full h-full object-cover" alt="AI" /> : <div className="w-full h-full bg-blue-500/10 flex items-center justify-center"><i className="fas fa-atom text-white"></i></div>}
           </div>
           {!isMobile && (
-            <div>
-              <h1 className={`${isTV ? 'text-5xl' : 'text-xl lg:text-3xl'} font-black tracking-tighter text-white`}>{prefs.assistantName}</h1>
+            <div className="animate-slide-in-right-bounce">
+              <h1 className={`${isTV ? 'text-5xl' : 'text-xl lg:text-3xl'} font-black tracking-tighter text-white uppercase`}>{prefs.assistantName}</h1>
               <HardwareSensors data={sensorData} deviceType={device} themeColor={themeData.primary} />
             </div>
           )}
         </div>
         <div className="flex items-center gap-3 md:gap-4">
-           <button onClick={() => setIsSettingsOpen(true)} title="Settings" className={`${isTV ? 'w-20 h-20' : 'w-10 h-10 md:w-12 md:h-12'} rounded-2xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-all`}><i className="fas fa-cog text-lg md:text-xl"></i></button>
-           <button onClick={() => setIsMemoryOpen(!isMemoryOpen)} title="Memory Bank" className={`${isTV ? 'w-20 h-20' : 'w-10 h-10 md:w-12 md:h-12'} rounded-2xl flex items-center justify-center transition-all ${isMemoryOpen ? 'bg-blue-500 text-white' : 'bg-white/5 text-gray-400'}`}><i className="fas fa-brain text-lg md:text-xl"></i></button>
-           <button onClick={handleLogout} className={`${isTV ? 'px-10 h-20' : 'px-2 md:px-4 h-12'} text-gray-600 hover:text-white transition-colors`}><i className="fas fa-sign-out-alt text-lg md:text-xl"></i></button>
+           <button onClick={() => setIsSettingsOpen(true)} className={`${isTV ? 'w-20 h-20' : 'w-10 h-10 md:w-12 md:h-12'} rounded-2xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-all active:scale-90 border border-white/5 shadow-lg`}><i className="fas fa-cog text-lg md:text-xl"></i></button>
+           <button onClick={() => setIsMemoryOpen(!isMemoryOpen)} className={`${isTV ? 'w-20 h-20' : 'w-10 h-10 md:w-12 md:h-12'} rounded-2xl flex items-center justify-center transition-all active:scale-90 border border-white/5 ${isMemoryOpen ? 'bg-blue-600 text-white shadow-[0_0_30px_rgba(37,99,235,0.4)]' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}><i className="fas fa-brain text-lg md:text-xl"></i></button>
+           <button onClick={handleLogout} className={`${isTV ? 'px-10 h-20' : 'px-2 md:px-4 h-12'} text-gray-600 hover:text-red-500 transition-colors active:scale-90`}><i className="fas fa-power-off text-lg md:text-xl"></i></button>
         </div>
       </header>
 
-      <main className={`flex-1 flex ${isMobile ? 'flex-col' : 'flex-row'} min-h-0 ${isTV ? 'p-12 gap-12' : 'p-4 lg:p-12 gap-8'} overflow-hidden`}>
+      <main className={`flex-1 flex ${isMobile ? 'flex-col' : 'flex-row'} min-h-0 ${isTV ? 'p-12 gap-12' : 'p-4 lg:p-8 gap-8'} overflow-hidden`}>
         <div className="flex-1 flex flex-col gap-4 lg:gap-8 min-h-0">
           {(isVisionActive || isScreenSharing) && (
-            <div className={`${isTV ? 'h-96' : 'h-64 md:h-80'} w-full animate-slide-up flex-shrink-0`}>
+            <div className={`${isTV ? 'h-96' : 'h-64 md:h-80'} w-full animate-pop flex-shrink-0 relative group`}>
+              <div className="absolute -inset-1 bg-gradient-to-r from-blue-500 to-purple-600 rounded-[2.5rem] blur opacity-20 group-hover:opacity-40 transition-opacity"></div>
               {isVisionActive && <ObservationMode isActive={isVisionActive} onFrame={(b) => currentFrameRef.current = b} />}
               {isScreenSharing && screenStream && <ScreenShareMode isActive={isScreenSharing} stream={screenStream} onFrame={(b) => currentFrameRef.current = b} onStop={() => setIsScreenSharing(false)} />}
             </div>
           )}
 
-          <div className={`flex-1 flex flex-col glass rounded-[3rem] overflow-hidden relative min-h-0`}>
-            {/* Transcription Feed */}
-            <div className={`flex-1 ${isTV ? 'p-12 space-y-12' : 'p-6 lg:p-12 space-y-6'} overflow-y-auto scrollbar-thin`} ref={scrollRef}>
+          <div className="flex-1 flex flex-col glass rounded-[3rem] overflow-hidden relative min-h-0 group shadow-2xl">
+            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 via-transparent to-purple-500/5 pointer-events-none opacity-40"></div>
+            
+            <div className={`flex-1 ${isTV ? 'p-12 space-y-12' : 'p-6 lg:p-10 space-y-8'} overflow-y-auto scrollbar-thin transcription-list`} ref={scrollRef}>
               {transcriptions.length === 0 && (
-                <div className="h-full flex flex-col items-center justify-center opacity-10">
-                  <i className={`fas fa-atom ${isTV ? 'text-[12rem]' : 'text-9xl'} mb-8`}></i>
-                  <p className={`${isTV ? 'text-4xl' : 'text-2xl'} font-black uppercase tracking-[1em]`}>Listening</p>
+                <div className="h-full flex flex-col items-center justify-center opacity-20 animate-float-3d">
+                  <i className={`fas fa-comment-dots ${isTV ? 'text-[14rem]' : 'text-9xl'} mb-10 text-gray-600`}></i>
+                  <p className={`${isTV ? 'text-5xl' : 'text-3xl'} font-black uppercase tracking-[1em] shimmer-text-fast`}>Chatty Core</p>
                 </div>
               )}
               
-              {transcriptions.map(e => (
-                <div key={e.id} className={`flex flex-col ${e.sender === 'user' ? 'items-end' : 'items-start'}`}>
-                  <div className={`${isTV ? 'max-w-[90%]' : 'max-w-[85%]'} ${isTV ? 'px-10 py-8 rounded-[4rem]' : 'px-6 py-4 rounded-[2rem]'} ${e.sender === 'user' ? `bg-${themeData.primary} text-white` : 'bg-white/5 text-gray-300'}`}>
-                    <p className={`${isTV ? 'text-3xl' : 'text-base'} font-bold leading-relaxed whitespace-pre-wrap`}>{e.text}</p>
+              {transcriptions.map((e, idx) => (
+                <div 
+                  key={e.id} 
+                  className={`flex flex-col ${e.sender === 'user' ? 'items-end' : 'items-start'} animate-slide-up-reveal`}
+                  style={{ animationDelay: `${Math.min(idx * 50, 500)}ms` }}
+                >
+                  <div className={`
+                    ${isTV ? 'max-w-[90%]' : 'max-w-[85%]'} 
+                    ${isTV ? 'px-12 py-10 rounded-[4rem]' : 'px-7 py-5 rounded-[2rem]'} 
+                    shadow-xl transition-transform hover:scale-[1.01]
+                    ${e.sender === 'user' 
+                      ? `bg-gradient-to-br from-${themeData.primary} to-indigo-600 text-white animate-slide-in-right-bounce` 
+                      : 'bg-white/[0.04] text-gray-200 border border-white/5 backdrop-blur-xl animate-pop'
+                    }
+                  `}>
+                    <p className={`${isTV ? 'text-4xl' : 'text-lg'} font-bold leading-relaxed whitespace-pre-wrap`}>{e.text}</p>
                     {e.sources && <GroundingSources sources={e.sources} themePrimary={themeData.primary} />}
                   </div>
-                  <span className="text-[10px] text-gray-600 font-black uppercase tracking-widest mt-2 mx-4">{new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  <span className="text-[11px] text-gray-600 font-black uppercase tracking-widest mt-2 mx-5 opacity-40">{new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 </div>
               ))}
-              {streamingAssistantText && (
-                <div className="items-start flex flex-col">
-                  <div className={`max-w-[85%] ${isTV ? 'px-10 py-8 text-2xl' : 'px-6 py-4 text-xs'} rounded-[2rem] bg-white/5 text-white/50 animate-pulse font-mono`}>
-                    {streamingAssistantText}
+              
+              {(streamingAssistantText || state === AssistantState.THINKING) && (
+                <div className="items-start flex flex-col animate-pop">
+                  <div className="max-w-[85%] px-7 py-5 rounded-[2rem] bg-white/[0.03] text-white/60 border border-white/5 shadow-lg">
+                    {streamingAssistantText ? (
+                      <p className="font-mono text-sm leading-relaxed">{streamingAssistantText}</p>
+                    ) : (
+                      <div className="typing-indicator">
+                        <span></span><span></span><span></span>
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
-              {state === AssistantState.THINKING && (
-                <div className={`flex items-center gap-2 ${isTV ? 'text-xl' : 'text-[10px]'} text-blue-400 font-black uppercase tracking-widest px-6`}>
-                  <i className="fas fa-circle-notch fa-spin"></i>
-                  Processing Logic...
                 </div>
               )}
             </div>
 
             {/* Controls */}
-            <div className={`${isTV ? 'p-12' : 'p-6 lg:p-10'} border-t border-white/5 bg-black/40 flex flex-col`}>
-              <div className="w-full">
+            <div className={`${isTV ? 'p-12' : 'p-8 lg:p-12'} border-t border-white/5 bg-black/50 backdrop-blur-2xl flex flex-col`}>
+              <div className="w-full relative mb-6">
+                <div className={`absolute inset-0 blur-[60px] rounded-full opacity-20 transition-colors duration-1000 ${state === AssistantState.SPEAKING ? 'bg-blue-500' : state === AssistantState.LISTENING ? 'bg-emerald-500' : 'bg-transparent'}`}></div>
                 <VoiceVisualizer state={state} analyser={analyserRef.current || undefined} />
               </div>
               
-              <div className={`mt-6 flex ${isMobile ? 'flex-col gap-4' : 'gap-4'} items-center`}>
+              <div className={`flex ${isMobile ? 'flex-col gap-5' : 'gap-5'} items-center`}>
                   <div className="flex gap-3 w-full md:w-auto">
-                    <button onClick={handleToggleVision} title="Toggle Optics" className={`${isTV ? 'w-20 h-20' : 'w-12 h-12 flex-1 md:flex-none'} rounded-xl flex items-center justify-center ${isVisionActive ? 'bg-red-500 text-white' : 'bg-white/5 text-gray-500 hover:text-white'}`}><i className="fas fa-camera text-xl"></i></button>
-                    <button onClick={handleToggleScreenShare} title="Toggle Desktop Link" className={`${isTV ? 'w-20 h-20' : 'w-12 h-12 flex-1 md:flex-none'} rounded-xl flex items-center justify-center ${isScreenSharing ? 'bg-cyan-500 text-white' : 'bg-white/5 text-gray-500 hover:text-white'}`}><i className="fas fa-desktop text-xl"></i></button>
+                    <button onClick={handleToggleVision} title="Optic Link" className={`${isTV ? 'w-24 h-24' : 'w-14 h-14 flex-1 md:flex-none'} rounded-2xl glass flex items-center justify-center active:scale-90 ${isVisionActive ? 'bg-red-500 text-white shadow-[0_0_30px_rgba(239,68,68,0.4)]' : 'text-gray-500 hover:text-white'}`}><i className="fas fa-camera text-xl"></i></button>
+                    <button onClick={handleToggleScreenShare} title="Desktop Uplink" className={`${isTV ? 'w-24 h-24' : 'w-14 h-14 flex-1 md:flex-none'} rounded-2xl glass flex items-center justify-center active:scale-90 ${isScreenSharing ? 'bg-cyan-500 text-white shadow-[0_0_30px_rgba(6,182,212,0.4)]' : 'text-gray-500 hover:text-white'}`}><i className="fas fa-desktop text-xl"></i></button>
                   </div>
                   
                   <input 
@@ -616,17 +602,17 @@ const App: React.FC = () => {
                     value={inputText} 
                     onChange={(e) => setInputText(e.target.value)} 
                     onKeyDown={(e) => e.key === 'Enter' && handleSendText()} 
-                    placeholder="Neural command..." 
-                    className={`flex-1 bg-white/5 border border-white/10 rounded-2xl ${isTV ? 'px-10 py-6 text-2xl' : 'px-6 py-4 text-base'} focus:outline-none focus:border-blue-500/40 text-white font-bold w-full`} 
+                    placeholder="Chatty directive..." 
+                    className={`flex-1 bg-white/5 border border-white/10 rounded-[2rem] ${isTV ? 'px-12 py-8 text-3xl' : 'px-8 py-5 text-lg'} focus:outline-none focus:border-blue-500/50 text-white font-bold transition-all shadow-inner placeholder-gray-700`} 
                   />
 
                   <button 
                     onClick={inputText.trim() ? handleSendText : (state === AssistantState.IDLE ? () => startSession() : stopSession)} 
-                    className={`${isTV ? 'w-96 h-24 text-3xl' : 'w-full md:w-52 h-16'} rounded-2xl flex items-center justify-center transition-all gap-4 ${state === AssistantState.IDLE ? 'bg-white text-black hover:scale-105' : 'bg-red-500 text-white animate-pulse'}`}
+                    className={`${isTV ? 'w-[400px] h-28 text-4xl' : 'w-full md:w-64 h-20'} rounded-[2rem] flex items-center justify-center transition-all gap-4 neo-button shadow-2xl ${state === AssistantState.IDLE ? 'bg-white text-black hover:scale-105' : 'bg-red-600 text-white animate-pulse'}`}
                   >
-                    <i className={`fas ${inputText.trim() ? 'fa-paper-plane' : (state === AssistantState.IDLE ? 'fa-microphone' : 'fa-square')}`}></i>
-                    <span className="font-black uppercase tracking-widest text-xs">
-                      {inputText.trim() ? 'Send' : (state === AssistantState.IDLE ? 'Initiate' : 'Terminate')}
+                    <i className={`fas ${inputText.trim() ? 'fa-paper-plane' : (state === AssistantState.IDLE ? 'fa-microphone' : 'fa-square')} text-lg`}></i>
+                    <span className="font-black uppercase tracking-[0.2em] text-[11px]">
+                      {inputText.trim() ? 'DISPATCH' : (state === AssistantState.IDLE ? 'INITIALIZE' : 'TERMINATE')}
                     </span>
                   </button>
               </div>
@@ -635,7 +621,7 @@ const App: React.FC = () => {
         </div>
         
         {isMemoryOpen && !isMobile && (
-          <div className={`${isTV ? 'w-[500px]' : 'w-full md:w-[360px]'} flex-shrink-0 h-full`}>
+          <div className={`${isTV ? 'w-[600px]' : 'w-full md:w-[420px]'} flex-shrink-0 h-full animate-slide-in-right-bounce`}>
             <MemoryBank memories={memories} onRemove={(id) => setMemories(p => p.filter(m => m.id !== id))} assistantName={prefs.assistantName} />
           </div>
         )}
@@ -646,10 +632,12 @@ const App: React.FC = () => {
         onClose={() => setIsSettingsOpen(false)}
         prefs={prefs}
         setPrefs={setPrefs}
-        voices={VOICES}
+        voices={dynamicVoices}
         personalities={PERSONALITIES}
         isTV={isTV}
         isWearable={isWearable}
+        onPreviewVoice={handlePreviewVoice}
+        previewingVoiceId={previewingVoiceId}
       />
     </div>
   );
