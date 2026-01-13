@@ -50,6 +50,76 @@ const DEFAULT_PREFS: UserPreferences = {
   modality: 'masculine'
 };
 
+// COMPONENT OPTIMIZATION: Memoized Bubble
+const TranscriptionBubble = React.memo(({ entry, deleteTranscription, themePrimary }: { entry: TranscriptionEntry, deleteTranscription: (id: string) => void, themePrimary: string }) => {
+  return (
+    <div className={`flex flex-col ${entry.sender === 'user' ? 'items-end' : 'items-start'} animate-slide-up-reveal group/item`}>
+      <div className={`
+        max-w-[90%] lg:max-w-[85%] 
+        px-4 py-3 lg:px-7 lg:py-5 
+        rounded-[1.5rem] lg:rounded-[2rem] 
+        shadow-xl transition-all hover:scale-[1.01] relative
+        ${entry.sender === 'user' 
+          ? 'bg-gradient-to-br from-[var(--theme-primary)] to-indigo-600 text-white' 
+          : 'bg-white/[0.04] text-gray-200 border border-white/5 backdrop-blur-xl'
+        }
+      `}>
+        <button 
+          onClick={() => deleteTranscription(entry.id)}
+          className={`absolute ${entry.sender === 'user' ? '-left-8' : '-right-8'} top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-40 hover:!opacity-100 text-red-500 transition-all p-2 active:scale-90`}
+        >
+          <i className="fas fa-trash-alt text-xs lg:text-sm"></i>
+        </button>
+        <p className="text-sm lg:text-lg font-bold leading-relaxed whitespace-pre-wrap">{entry.text}</p>
+        {entry.sources && <GroundingSources sources={entry.sources} themePrimary={themePrimary} />}
+        <div className={`mt-2 text-[8px] opacity-40 uppercase font-black tracking-widest ${entry.sender === 'user' ? 'text-right' : 'text-left'}`}>
+          {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+// COMPONENT OPTIMIZATION: Memoized List
+const TranscriptionList = React.memo(({ transcriptions, deleteTranscription, themePrimary }: { transcriptions: TranscriptionEntry[], deleteTranscription: (id: string) => void, themePrimary: string }) => {
+  const grouped = useMemo(() => {
+    const groups: Record<string, TranscriptionEntry[]> = {};
+    transcriptions.forEach(entry => {
+      const dateKey = new Date(entry.timestamp).toDateString();
+      if (!groups[dateKey]) groups[dateKey] = [];
+      groups[dateKey].push(entry);
+    });
+    return groups;
+  }, [transcriptions]);
+
+  const formatDateHeader = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+    if (date.toDateString() === today.toDateString()) return "Today";
+    if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+    return date.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  };
+
+  return (
+    <>
+      {Object.entries(grouped).map(([dateStr, items]) => (
+        <React.Fragment key={dateStr}>
+          <div className="day-separator animate-fade-blur-in">
+            <div className="day-line"></div>
+            <div className="day-badge">{formatDateHeader(dateStr)}</div>
+            <div className="day-line"></div>
+          </div>
+          {items.map((e) => (
+            <TranscriptionBubble key={e.id} entry={e} deleteTranscription={deleteTranscription} themePrimary={themePrimary} />
+          ))}
+        </React.Fragment>
+      ))}
+    </>
+  );
+});
+
 const App = () => {
   const [showIntro, setShowIntro] = useState(true);
   const [user, setUser] = useState<{username: string, preferences: UserPreferences} | null>(null);
@@ -81,6 +151,7 @@ const App = () => {
   const sessionRef = useRef<any>(null);
   const currentFrameRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const saveTimeoutRef = useRef<number | null>(null);
 
   const themeData = useMemo(() => THEMES[prefs.theme] || THEMES.cosmic, [prefs.theme]);
 
@@ -118,7 +189,6 @@ const App = () => {
       const w = window.innerWidth;
       const h = window.innerHeight;
       const ua = navigator.userAgent.toLowerCase();
-      
       let detectedDevice: DeviceType = 'desktop';
       if (w <= 300 || (ua.includes('watch') && !ua.includes('tv'))) detectedDevice = 'wear';
       else if (ua.includes('android') && w > h && w >= 800 && w <= 1280) detectedDevice = 'auto';
@@ -129,7 +199,6 @@ const App = () => {
         setDevice(detectedDevice);
         document.documentElement.setAttribute('data-device', detectedDevice);
       }
-
       const sensorPayload: SensorData = { online: navigator.onLine, platform: navigator.platform };
       if ('getBattery' in navigator) {
         try {
@@ -138,44 +207,38 @@ const App = () => {
           sensorPayload.charging = battery.charging;
         } catch (e) {}
       }
-
       if (navigator.geolocation && ['auto', 'mobile', 'desktop'].includes(detectedDevice)) {
         navigator.geolocation.getCurrentPosition(
           (pos) => isMounted && setSensorData(prev => ({ ...prev, location: { lat: pos.coords.latitude, lng: pos.coords.longitude } })),
-          undefined,
-          { enableHighAccuracy: false, timeout: 5000 }
+          undefined, { enableHighAccuracy: false, timeout: 5000 }
         );
       }
       if (isMounted) {
         setSensorData(prev => ({ ...prev, ...sensorPayload }));
         setTimeout(() => setIsScanning(false), 2000);
       }
-    } catch (err) {
-      console.error("Hardware probe failure", err);
-    }
+    } catch (err) { console.error("Hardware probe failure", err); }
   }, []);
 
   useEffect(() => {
     let isMounted = true;
     detectHardware(isMounted);
-    const handleResize = () => detectHardware(isMounted);
-    window.addEventListener('resize', handleResize);
-    return () => {
-      isMounted = false;
-      window.removeEventListener('resize', handleResize);
+    let resizeTimer: number;
+    const handleResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(() => detectHardware(isMounted), 250);
     };
+    window.addEventListener('resize', handleResize);
+    return () => { isMounted = false; window.removeEventListener('resize', handleResize); };
   }, [detectHardware]);
 
   useEffect(() => {
-    // Priority: Session (current tab) -> Persistent (localStorage)
     const sessionUser = sessionStorage.getItem('nova_session_user') || localStorage.getItem('nova_persistent_user');
     if (sessionUser) {
       try {
         const savedPrefs = localStorage.getItem(`nova_${sessionUser}_prefs`);
         setUser({ username: sessionUser, preferences: savedPrefs ? JSON.parse(savedPrefs) : DEFAULT_PREFS });
-      } catch (e) {
-        setUser({ username: sessionUser, preferences: DEFAULT_PREFS });
-      }
+      } catch (e) { setUser({ username: sessionUser, preferences: DEFAULT_PREFS }); }
     }
   }, []);
 
@@ -188,46 +251,21 @@ const App = () => {
     }
   }, [user]);
 
+  // PERSISTENCE OPTIMIZATION: Throttled saving to disk
   useEffect(() => {
     if (user) {
-      localStorage.setItem(`nova_${user.username}_prefs`, JSON.stringify(prefs));
-      localStorage.setItem(`nova_${user.username}_memories`, JSON.stringify(memories));
-      localStorage.setItem(`nova_${user.username}_logs`, JSON.stringify(transcriptions));
+      if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = window.setTimeout(() => {
+        localStorage.setItem(`nova_${user.username}_prefs`, JSON.stringify(prefs));
+        localStorage.setItem(`nova_${user.username}_memories`, JSON.stringify(memories));
+        localStorage.setItem(`nova_${user.username}_logs`, JSON.stringify(transcriptions));
+      }, 1000);
     }
   }, [prefs, memories, transcriptions, user]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [transcriptions, streamingUserText, streamingAssistantText]);
-
-  // CHAT BY DAY LOGIC
-  const groupedTranscriptions = useMemo(() => {
-    const groups: Record<string, TranscriptionEntry[]> = {};
-    transcriptions.forEach(entry => {
-      const date = new Date(entry.timestamp);
-      const dateKey = date.toDateString();
-      if (!groups[dateKey]) groups[dateKey] = [];
-      groups[dateKey].push(entry);
-    });
-    return groups;
-  }, [transcriptions]);
-
-  const formatDateHeader = (dateStr: string) => {
-    const date = new Date(dateStr);
-    const today = new Date();
-    const yesterday = new Date();
-    yesterday.setDate(today.getDate() - 1);
-
-    if (date.toDateString() === today.toDateString()) return "Today";
-    if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
-    
-    return date.toLocaleDateString(undefined, { 
-      weekday: 'long', 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
-    });
-  };
 
   const isWearable = device === 'wear';
   const isAuto = device === 'auto';
@@ -241,14 +279,12 @@ const App = () => {
     ]);
   }, []);
 
-  const deleteTranscription = (id: string) => {
+  const deleteTranscription = useCallback((id: string) => {
     setTranscriptions(prev => prev.filter(t => t.id !== id));
-  };
+  }, []);
 
   const clearAllTranscriptions = () => {
-    if (window.confirm("Purge all chat records from this segment?")) {
-      setTranscriptions([]);
-    }
+    if (window.confirm("Purge all chat records from this segment?")) setTranscriptions([]);
   };
 
   const stopSession = useCallback(() => {
@@ -277,23 +313,12 @@ const App = () => {
     setUser({ username, preferences: { ...DEFAULT_PREFS, ...initialPrefs } });
   };
 
-  const downsample = (buffer: Float32Array, fromRate: number, toRate: number) => {
-    if (fromRate === toRate) return buffer;
-    const ratio = fromRate / toRate;
-    const result = new Float32Array(Math.round(buffer.length / ratio));
-    for (let i = 0, offset = 0; i < result.length; i++, offset = Math.round(i * ratio)) {
-      result[i] = buffer[offset];
-    }
-    return result;
-  };
-
   const handlePreviewVoice = async (voiceId: string) => {
     if (previewingVoiceId) return;
     try {
       setPreviewingVoiceId(voiceId);
       const apiKey = process.env.API_KEY;
       if (!apiKey) throw new Error("API Key missing.");
-
       if (!audioContextRef.current) {
         audioContextRef.current = {
           input: new (window.AudioContext || (window as any).webkitAudioContext)(),
@@ -302,20 +327,13 @@ const App = () => {
       }
       const outputCtx = audioContextRef.current.output;
       if (outputCtx.state === 'suspended') await outputCtx.resume();
-
       const ai = new GoogleGenAI({ apiKey });
       const voice = dynamicVoices.find(v => v.id === voiceId);
-      const prompt = `Say: Hello, I am ${voice?.name}. I am your chatty voice profile.`;
-
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: prompt }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceId } } },
-        },
+        contents: [{ parts: [{ text: `Hello, I am ${voice?.name}. Profile link active.` }] }],
+        config: { responseModalities: [Modality.AUDIO], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceId } } } },
       });
-
       const audioPart = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
       if (audioPart?.inlineData?.data) {
         const audioBuffer = await audioUtils.decodeAudioData(audioUtils.decode(audioPart.inlineData.data), outputCtx, 24000, 1);
@@ -333,7 +351,6 @@ const App = () => {
       setState(AssistantState.CONNECTING);
       const apiKey = process.env.API_KEY;
       if (!apiKey) throw new Error("API Authentication failure.");
-
       if (!audioContextRef.current) {
         audioContextRef.current = {
           input: new (window.AudioContext || (window as any).webkitAudioContext)(),
@@ -343,41 +360,31 @@ const App = () => {
       const { input: inputCtx, output: outputCtx } = audioContextRef.current;
       if (inputCtx.state === 'suspended') await inputCtx.resume();
       if (outputCtx.state === 'suspended') await outputCtx.resume();
-
       audioUtils.playLinkSound(outputCtx);
-
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000, channelCount: 1 } 
       });
       micStreamRef.current = stream;
-      
       const source = inputCtx.createMediaStreamSource(stream);
       const analyser = inputCtx.createAnalyser();
       analyser.fftSize = 256;
       analyserRef.current = analyser;
       source.connect(analyser);
-
       const ai = new GoogleGenAI({ apiKey });
       const personalityPrompt = prefs.personality === 'custom' ? (prefs.customPersonality || 'Be helpful.') : PERSONALITIES[prefs.personality];
-      
       const tools: any[] = [];
       if (sensorData.location) tools.push({ googleMaps: {} });
       if (searchEnabled) tools.push({ googleSearch: {} });
       if (!searchEnabled && !sensorData.location) tools.push({ functionDeclarations: [saveKnowledgeTool] });
-
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: {
           responseModalities: [Modality.AUDIO],
           tools,
-          toolConfig: sensorData.location ? {
-            retrievalConfig: { latLng: { latitude: sensorData.location.lat, longitude: sensorData.location.lng } }
-          } : undefined,
+          toolConfig: sensorData.location ? { retrievalConfig: { latLng: { latitude: sensorData.location.lat, longitude: sensorData.location.lng } } } : undefined,
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: prefs.voiceId } } },
-          systemInstruction: `Identity: ${prefs.assistantName}. Platform: ${device}. Personality: ${personalityPrompt}.`,
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
-          thinkingConfig: { thinkingBudget: 24576 }
+          systemInstruction: `Identity: ${prefs.assistantName}. Personality: ${personalityPrompt}.`,
+          inputAudioTranscription: {}, outputAudioTranscription: {}, thinkingConfig: { thinkingBudget: 24576 }
         } as any,
         callbacks: {
           onopen: () => {
@@ -386,8 +393,10 @@ const App = () => {
             scriptProcessorRef.current = scriptProcessor;
             scriptProcessor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
-              const resampledData = downsample(inputData, inputCtx.sampleRate, 16000);
-              const pcmBlob = audioUtils.createPcmBlob(resampledData);
+              const l = inputData.length;
+              const int16 = new Int16Array(l);
+              for (let i = 0; i < l; i++) int16[i] = inputData[i] * 32768;
+              const pcmBlob = { data: audioUtils.encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' };
               sessionPromise.then(s => s.sendRealtimeInput({ media: pcmBlob }));
               if (currentFrameRef.current) {
                 const frame = currentFrameRef.current;
@@ -403,13 +412,11 @@ const App = () => {
             if (message.toolCall) {
               for (const fc of message.toolCall.functionCalls) {
                 if (fc.name === 'save_knowledge') {
-                  const factStr = fc.args.fact;
-                  setMemories(p => [...p, { id: Math.random().toString(36).substr(2, 9), fact: factStr, timestamp: new Date() }]);
+                  setMemories(p => [...p, { id: Math.random().toString(36).substr(2, 9), fact: fc.args.fact, timestamp: new Date() }]);
                   sessionPromise.then(s => s.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: { result: "Saved." } } }));
                 }
               }
             }
-            
             const turnParts = message.serverContent?.modelTurn?.parts || [];
             for (const part of turnParts) {
               if (part.inlineData?.data) {
@@ -417,39 +424,27 @@ const App = () => {
                 nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputCtx.currentTime);
                 const buffer = await audioUtils.decodeAudioData(audioUtils.decode(part.inlineData.data), outputCtx, 24000, 1);
                 const s = outputCtx.createBufferSource(); 
-                s.buffer = buffer; 
-                s.connect(outputCtx.destination);
+                s.buffer = buffer; s.connect(outputCtx.destination);
                 s.onended = () => { activeSourcesRef.current.delete(s); if (activeSourcesRef.current.size === 0) setState(AssistantState.LISTENING); };
                 s.start(nextStartTimeRef.current); 
                 nextStartTimeRef.current += buffer.duration; 
                 activeSourcesRef.current.add(s);
               }
             }
-            
             if (message.serverContent?.inputTranscription) setStreamingUserText(prev => prev + message.serverContent.inputTranscription.text);
             if (message.serverContent?.outputTranscription) setStreamingAssistantText(prev => prev + message.serverContent.outputTranscription.text);
             if (message.serverContent?.turnComplete) {
               const chunks = message.serverContent?.groundingMetadata?.groundingChunks || [];
-              const sources = chunks.map((c: any) => {
-                if (c.web) return { title: c.web.title, uri: c.web.uri };
-                if (c.maps) return { title: c.maps.title, uri: c.maps.uri };
-                return null;
-              }).filter(Boolean);
-
+              const sources = chunks.map((c: any) => (c.web ? { title: c.web.title, uri: c.web.uri } : (c.maps ? { title: c.maps.title, uri: c.maps.uri } : null))).filter(Boolean);
               setStreamingUserText(u => { if (u) addTranscription('user', u); return ''; });
               setStreamingAssistantText(a => { if (a) { addTranscription('assistant', a, sources); audioUtils.playSuccessSound(outputCtx); } return ''; });
             }
           },
-          onerror: () => stopSession(),
-          onclose: () => stopSession()
+          onerror: () => stopSession(), onclose: () => stopSession()
         }
       });
       sessionRef.current = await sessionPromise;
-    } catch (err: any) { 
-      setErrorToast(err.message);
-      setState(AssistantState.IDLE); 
-      setTimeout(() => setErrorToast(null), 5000);
-    }
+    } catch (err: any) { setErrorToast(err.message); setState(AssistantState.IDLE); setTimeout(() => setErrorToast(null), 5000); }
   };
 
   const handleToggleScreenShare = async () => {
@@ -459,9 +454,7 @@ const App = () => {
     } else {
       try {
         const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-        setScreenStream(stream);
-        setIsVisionActive(false);
-        setIsScreenSharing(true);
+        setScreenStream(stream); setIsVisionActive(false); setIsScreenSharing(true);
         if (state === AssistantState.IDLE) startSession();
         stream.getVideoTracks()[0].onended = () => { setIsScreenSharing(false); setScreenStream(null); };
       } catch (err: any) { setErrorToast(err.message); }
@@ -471,12 +464,8 @@ const App = () => {
   const handleToggleVision = async () => {
     if (isVisionActive) setIsVisionActive(false);
     else {
-      try {
-        await navigator.mediaDevices.getUserMedia({ video: true });
-        setIsScreenSharing(false);
-        setIsVisionActive(true);
-        if (state === AssistantState.IDLE) startSession();
-      } catch (err) { setErrorToast("Optic access denied."); }
+      try { await navigator.mediaDevices.getUserMedia({ video: true }); setIsScreenSharing(false); setIsVisionActive(true); if (state === AssistantState.IDLE) startSession(); }
+      catch (err) { setErrorToast("Optic access denied."); }
     }
   };
 
@@ -485,15 +474,11 @@ const App = () => {
     const msg = inputText.trim();
     setInputText('');
     addTranscription('user', msg);
-    if (sessionRef.current) {
-      setState(AssistantState.THINKING);
-      sessionRef.current.sendRealtimeInput({ text: msg });
-    } else startSession(msg);
+    if (sessionRef.current) { setState(AssistantState.THINKING); sessionRef.current.sendRealtimeInput({ text: msg }); } else startSession(msg);
   };
 
   if (showIntro) return <IntroSequence onComplete={() => setShowIntro(false)} />;
   if (!user) return <LoginPage onLogin={handleLogin} />;
-
   if (isScanning) {
     return (
       <div className="fixed inset-0 bg-[#02020a] flex flex-col items-center justify-center z-[200] animate-fade-blur-in overflow-hidden">
@@ -503,7 +488,7 @@ const App = () => {
           <div className="absolute inset-4 border-2 border-b-[var(--theme-secondary)] border-t-transparent border-r-transparent border-l-transparent rounded-full animate-spin [animation-duration:3s]"></div>
           <i className="fas fa-atom text-6xl text-white animate-pulse"></i>
         </div>
-        <h2 className="mt-12 text-2xl font-black tracking-[0.5em] uppercase text-white mb-2 text-center animate-slide-up-reveal px-6">Chatty Sync Active</h2>
+        <h2 className="mt-12 text-2xl font-black tracking-[0.5em] uppercase text-white mb-2 text-center">Chatty Sync Active</h2>
         <p className="text-[11px] text-[var(--theme-primary)] font-black uppercase tracking-[0.3em] animate-pulse">Linking Bio-Core...</p>
       </div>
     );
@@ -519,31 +504,26 @@ const App = () => {
         </div>
       )}
 
-      <header className={`m-[var(--ui-gap)] p-4 lg:p-6 rounded-[var(--ui-radius)] flex items-center justify-between z-50 glass animate-fade-blur-in`}>
+      <header className="m-[var(--ui-gap)] p-4 lg:p-6 rounded-[var(--ui-radius)] flex items-center justify-between z-50 glass animate-fade-blur-in">
         <div className="flex items-center gap-3 lg:gap-6 group">
-          <div className={`w-10 h-10 lg:w-14 lg:h-14 rounded-[1.5rem] overflow-hidden border border-white/10 relative transition-all duration-700 group-hover:scale-110 shadow-xl`}>
+          <div className="w-10 h-10 lg:w-14 lg:h-14 rounded-[1.5rem] overflow-hidden border border-white/10 relative transition-all duration-700 group-hover:scale-110 shadow-xl">
             {prefs.assistantProfilePic ? <img src={prefs.assistantProfilePic} className="w-full h-full object-cover" alt="AI" /> : <div className="w-full h-full bg-[var(--theme-primary)]/10 flex items-center justify-center"><i className="fas fa-atom text-white text-lg lg:text-xl"></i></div>}
           </div>
           {!isWearable && (
             <div className="animate-slide-in-right-bounce">
               <h1 className="text-sm lg:text-2xl font-black tracking-tighter text-white uppercase truncate max-w-[120px] lg:max-w-none">{prefs.assistantName}</h1>
-              {/* Fix: use themeData.primary instead of undefined themeColor */}
               {!isMobile && <HardwareSensors data={sensorData} deviceType={device} themeColor={themeData.primary} />}
             </div>
           )}
         </div>
         <div className="flex items-center gap-2 md:gap-4">
            {transcriptions.length > 0 && !isWearable && (
-             <button 
-               onClick={clearAllTranscriptions} 
-               className="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 flex items-center justify-center transition-all active:scale-90"
-               title="Clear All History"
-             >
+             <button onClick={clearAllTranscriptions} className="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 flex items-center justify-center transition-all active:scale-90" title="Clear All History">
                <i className="fas fa-trash-sweep text-sm lg:text-lg"></i>
              </button>
            )}
            {!isWearable && <button onClick={() => setIsSettingsOpen(true)} className="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-all active:scale-90"><i className="fas fa-cog text-sm lg:text-lg"></i></button>}
-           {!isWearable && <button onClick={() => setIsMemoryOpen(!isMemoryOpen)} className={`w-10 h-10 lg:w-12 lg:h-12 rounded-xl flex items-center justify-center transition-all active:scale-90 ${isMemoryOpen ? 'bg-[var(--theme-primary)] text-white shadow-[0_0_30px_rgba(37,99,235,0.4)]' : 'bg-white/5 text-gray-400'}`}><i className="fas fa-brain text-sm lg:text-lg"></i></button>}
+           {!isWearable && <button onClick={() => setIsMemoryOpen(!isMemoryOpen)} className={`w-10 h-10 lg:w-12 lg:h-12 rounded-xl flex items-center justify-center transition-all active:scale-90 ${isMemoryOpen ? 'bg-[var(--theme-primary)] text-white' : 'bg-white/5 text-gray-400'}`}><i className="fas fa-brain text-sm lg:text-lg"></i></button>}
            <button onClick={handleLogout} className="w-10 h-10 lg:w-12 lg:h-12 flex items-center justify-center text-gray-600 hover:text-red-500 transition-colors active:scale-90"><i className="fas fa-power-off text-sm lg:text-lg"></i></button>
         </div>
       </header>
@@ -551,64 +531,25 @@ const App = () => {
       <main className={`flex-1 flex ${isMobile || isWearable ? 'flex-col' : 'flex-row'} min-h-0 p-[var(--ui-gap)] gap-[var(--ui-gap)] overflow-hidden`}>
         <div className="flex-1 flex flex-col gap-[var(--ui-gap)] min-h-0">
           {(isVisionActive || isScreenSharing) && (
-            <div className={`h-48 md:h-72 lg:h-[400px] w-full animate-pop flex-shrink-0 relative group`}>
-              <div className={`absolute -inset-1 bg-gradient-to-r from-[var(--theme-primary)] to-[var(--theme-secondary)] rounded-[var(--ui-radius)] blur opacity-20 group-hover:opacity-40 transition-opacity`}></div>
+            <div className="h-48 md:h-72 lg:h-[400px] w-full animate-pop flex-shrink-0 relative group">
               {isVisionActive && <ObservationMode isActive={isVisionActive} onFrame={(b) => currentFrameRef.current = b} />}
               {isScreenSharing && screenStream && <ScreenShareMode isActive={isScreenSharing} stream={screenStream} onFrame={(b) => currentFrameRef.current = b} onStop={() => setIsScreenSharing(false)} />}
             </div>
           )}
 
           <div className="flex-1 flex flex-col glass rounded-[var(--ui-radius)] overflow-hidden relative min-h-0 group shadow-2xl">
-            <div className={`absolute inset-0 bg-gradient-to-br from-[var(--theme-primary)]/5 via-transparent to-[var(--theme-secondary)]/5 pointer-events-none opacity-40`}></div>
-            
             <div className={`flex-1 p-4 lg:p-8 space-y-4 lg:space-y-8 overflow-y-auto scrollbar-thin transcription-list`} ref={scrollRef}>
               {transcriptions.length === 0 && (
                 <div className="h-full flex flex-col items-center justify-center opacity-20 animate-float-3d">
-                  <i className={`fas fa-comment-dots text-6xl lg:text-9xl mb-6 text-gray-600`}></i>
+                  <i className="fas fa-comment-dots text-6xl lg:text-9xl mb-6 text-gray-600"></i>
                   {!isWearable && <p className="text-xl lg:text-3xl font-black uppercase tracking-[0.5em] shimmer-text-fast">Chatty Core</p>}
                 </div>
               )}
               
-              {/* RENDER GROUPED TRANSCRIPTIONS BY DAY */}
-              {Object.entries(groupedTranscriptions).map(([dateStr, items]) => (
-                <React.Fragment key={dateStr}>
-                  <div className="day-separator animate-fade-blur-in">
-                    <div className="day-line"></div>
-                    <div className="day-badge">{formatDateHeader(dateStr)}</div>
-                    <div className="day-line"></div>
-                  </div>
-                  
-                  {items.map((e) => (
-                    <div key={e.id} className={`flex flex-col ${e.sender === 'user' ? 'items-end' : 'items-start'} animate-slide-up-reveal group/item`}>
-                      <div className={`
-                        max-w-[90%] lg:max-w-[85%] 
-                        px-4 py-3 lg:px-7 lg:py-5 
-                        rounded-[1.5rem] lg:rounded-[2rem] 
-                        shadow-xl transition-all hover:scale-[1.01] relative
-                        ${e.sender === 'user' 
-                          ? 'bg-gradient-to-br from-[var(--theme-primary)] to-indigo-600 text-white' 
-                          : 'bg-white/[0.04] text-gray-200 border border-white/5 backdrop-blur-xl'
-                        }
-                      `}>
-                        {/* Quick Delete Trigger */}
-                        <button 
-                          onClick={() => deleteTranscription(e.id)}
-                          className={`absolute ${e.sender === 'user' ? '-left-8' : '-right-8'} top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-40 hover:!opacity-100 text-red-500 transition-all p-2 active:scale-90`}
-                        >
-                          <i className="fas fa-trash-alt text-xs lg:text-sm"></i>
-                        </button>
-
-                        <p className="text-sm lg:text-lg font-bold leading-relaxed whitespace-pre-wrap">{e.text}</p>
-                        {!isWearable && e.sources && <GroundingSources sources={e.sources} themePrimary={themeData.primary} />}
-                        <div className={`mt-2 text-[8px] opacity-40 uppercase font-black tracking-widest ${e.sender === 'user' ? 'text-right' : 'text-left'}`}>
-                          {new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </React.Fragment>
-              ))}
+              {/* PERFORMANCE FIX: Use the optimized, memoized list component */}
+              <TranscriptionList transcriptions={transcriptions} deleteTranscription={deleteTranscription} themePrimary={themeData.primary} />
               
+              {/* PERFORMANCE FIX: Isolated streaming components to prevent full list re-renders */}
               {(streamingAssistantText || state === AssistantState.THINKING) && (
                 <div className="items-start flex flex-col animate-pop">
                   <div className="max-w-[85%] px-5 py-3 rounded-[1.5rem] bg-white/[0.03] text-white/60 border border-white/5">
@@ -616,24 +557,28 @@ const App = () => {
                   </div>
                 </div>
               )}
+              {streamingUserText && (
+                <div className="items-end flex flex-col animate-pop">
+                  <div className="max-w-[85%] px-5 py-3 rounded-[1.5rem] bg-gradient-to-br from-[var(--theme-primary)] to-indigo-600 text-white/80">
+                    <p className="font-mono text-xs lg:text-sm">{streamingUserText}</p>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div className={`p-4 lg:p-8 border-t border-white/5 bg-black/50 backdrop-blur-2xl flex flex-col gap-3 lg:gap-6`}>
+            <div className="p-4 lg:p-8 border-t border-white/5 bg-black/50 backdrop-blur-2xl flex flex-col gap-3 lg:gap-6">
               {!isWearable && <VoiceVisualizer state={state} analyser={analyserRef.current || undefined} />}
               <div className={`flex ${isWearable ? 'flex-col gap-2' : 'gap-3'} items-center`}>
                   {!isWearable && (
                     <div className="flex gap-2">
-                      <button onClick={handleToggleVision} title="Optic Link" className="w-10 h-10 lg:w-14 lg:h-14 rounded-xl glass flex items-center justify-center active:scale-90 transition-all"><i className="fas fa-camera text-sm lg:text-lg"></i></button>
-                      <button onClick={handleToggleScreenShare} title="Desktop Uplink" className="w-10 h-10 lg:w-14 lg:h-14 rounded-xl glass flex items-center justify-center active:scale-90 transition-all"><i className="fas fa-desktop text-sm lg:text-lg"></i></button>
+                      <button onClick={handleToggleVision} title="Optic Link" className="w-10 h-10 lg:w-14 lg:h-14 rounded-xl glass flex items-center justify-center active:scale-90"><i className="fas fa-camera text-sm lg:text-lg"></i></button>
+                      <button onClick={handleToggleScreenShare} title="Desktop Uplink" className="w-10 h-10 lg:w-14 lg:h-14 rounded-xl glass flex items-center justify-center active:scale-90"><i className="fas fa-desktop text-sm lg:text-lg"></i></button>
                     </div>
                   )}
                   {!isWearable && (
-                    <input type="text" value={inputText} onChange={(e) => setInputText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSendText()} placeholder="Directive..." className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 lg:px-6 py-3 lg:py-5 text-sm lg:text-lg focus:outline-none focus:border-[var(--theme-primary)]/50 text-white font-bold transition-all shadow-inner placeholder-gray-700" />
+                    <input type="text" value={inputText} onChange={(e) => setInputText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSendText()} placeholder="Directive..." className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 lg:px-6 py-3 lg:py-5 text-sm lg:text-lg focus:outline-none focus:border-[var(--theme-primary)]/50 text-white font-bold placeholder-gray-700" />
                   )}
-                  <button 
-                    onClick={inputText.trim() ? handleSendText : (state === AssistantState.IDLE ? () => startSession() : stopSession)} 
-                    className={`${isWearable ? 'w-full h-12' : 'flex-1 md:flex-none md:w-48 lg:w-64 h-14 lg:h-20'} rounded-[1.5rem] lg:rounded-[2rem] flex items-center justify-center transition-all gap-2 lg:gap-4 neo-button shadow-2xl ${state === AssistantState.IDLE ? 'bg-white text-black' : 'bg-red-600 text-white animate-pulse'}`}
-                  >
+                  <button onClick={inputText.trim() ? handleSendText : (state === AssistantState.IDLE ? () => startSession() : stopSession)} className={`${isWearable ? 'w-full h-12' : 'flex-1 md:flex-none md:w-48 lg:w-64 h-14 lg:h-20'} rounded-[1.5rem] lg:rounded-[2rem] flex items-center justify-center transition-all gap-2 lg:gap-4 neo-button shadow-2xl ${state === AssistantState.IDLE ? 'bg-white text-black' : 'bg-red-600 text-white animate-pulse'}`}>
                     <i className={`fas ${inputText.trim() ? 'fa-paper-plane' : (state === AssistantState.IDLE ? 'fa-microphone' : 'fa-square')} text-sm lg:text-lg`}></i>
                     <span className="font-black uppercase tracking-widest text-[8px] lg:text-[11px]">{inputText.trim() ? 'SEND' : (state === AssistantState.IDLE ? 'INITIALIZE' : 'STOP')}</span>
                   </button>
@@ -648,7 +593,6 @@ const App = () => {
           </div>
         )}
       </main>
-
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} prefs={prefs} setPrefs={setPrefs} voices={dynamicVoices} personalities={PERSONALITIES} isTV={isTV} isWearable={isWearable} onPreviewVoice={handlePreviewVoice} previewingVoiceId={previewingVoiceId} />
     </div>
   );
