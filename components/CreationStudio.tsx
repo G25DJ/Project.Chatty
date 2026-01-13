@@ -43,13 +43,22 @@ const CreationStudio: React.FC<CreationStudioProps> = ({ onClose, onAssetGenerat
           config: { imageConfig: { aspectRatio: "1:1" } }
         });
 
-        const part = response.candidates[0].content.parts.find(p => p.inlineData);
-        if (part?.inlineData) {
-          const url = `data:image/png;base64,${part.inlineData.data}`;
+        // Iterating through all parts as recommended in SDK guidelines
+        let imageUrl = null;
+        if (response.candidates?.[0]?.content?.parts) {
+          for (const part of response.candidates[0].content.parts) {
+            if (part.inlineData) {
+              imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+              break;
+            }
+          }
+        }
+
+        if (imageUrl) {
           onAssetGenerated({
             id: Math.random().toString(36).substr(2, 9),
             type: 'image',
-            url,
+            url: imageUrl,
             prompt,
             timestamp: new Date()
           });
@@ -101,23 +110,24 @@ const CreationStudio: React.FC<CreationStudioProps> = ({ onClose, onAssetGenerat
 
   return (
     <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-xl flex items-center justify-center p-6 animate-fade-in">
-      <div className="w-full max-w-4xl bg-[#05050f] border border-white/10 rounded-[3rem] overflow-hidden flex flex-col h-[80vh]">
+      <div className="w-full max-w-4xl bg-[#05050f] border border-white/10 rounded-[3rem] overflow-hidden flex flex-col h-[80vh] shadow-2xl shadow-blue-500/5">
         <div className="flex items-center justify-between p-8 border-b border-white/5">
           <div className="flex gap-4">
             <button 
               onClick={() => setActiveTab('image')} 
-              className={`px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'image' ? `bg-${themePrimary} text-white` : 'text-gray-500 hover:text-white'}`}
+              className={`px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'image' ? 'text-white' : 'text-gray-500 hover:text-white'}`}
+              style={activeTab === 'image' ? { backgroundColor: themePrimary } : {}}
             >
               Visual Forge
             </button>
             <button 
               onClick={() => setActiveTab('video')} 
-              className={`px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'video' ? `bg-purple-600 text-white` : 'text-gray-500 hover:text-white'}`}
+              className={`px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'video' ? 'bg-purple-600 text-white' : 'text-gray-500 hover:text-white'}`}
             >
               Motion Engine
             </button>
           </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-white"><i className="fas fa-times text-xl"></i></button>
+          <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors"><i className="fas fa-times text-xl"></i></button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-10 space-y-8 scrollbar-thin">
@@ -127,7 +137,7 @@ const CreationStudio: React.FC<CreationStudioProps> = ({ onClose, onAssetGenerat
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               placeholder={activeTab === 'image' ? "Envision the visual link..." : "Envision the motion..."}
-              className="w-full h-32 bg-white/5 border border-white/10 rounded-2xl p-6 text-white font-medium focus:outline-none focus:border-blue-500/50 resize-none transition-all"
+              className="w-full h-32 bg-white/5 border border-white/10 rounded-2xl p-6 text-white font-medium focus:outline-none focus:border-[var(--theme-primary)]/50 resize-none transition-all"
             />
           </div>
 
@@ -143,7 +153,8 @@ const CreationStudio: React.FC<CreationStudioProps> = ({ onClose, onAssetGenerat
                   </button>
                   <button 
                     onClick={() => setQuality('pro')} 
-                    className={`px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-tighter ${quality === 'pro' ? 'bg-blue-500/20 text-blue-400' : 'text-gray-500'}`}
+                    className={`px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-tighter transition-colors ${quality === 'pro' ? 'text-blue-400 bg-blue-500/10' : 'text-gray-500'}`}
+                    style={quality === 'pro' ? { color: themePrimary, backgroundColor: `${themePrimary}1A` } : {}}
                   >
                     High Fidelity
                   </button>
@@ -162,7 +173,7 @@ const CreationStudio: React.FC<CreationStudioProps> = ({ onClose, onAssetGenerat
             <button 
               onClick={handleGenerate}
               disabled={isGenerating || !prompt.trim()}
-              className={`px-10 py-4 rounded-2xl font-black uppercase tracking-widest text-xs flex items-center gap-3 transition-all ${isGenerating ? 'bg-white/10 text-gray-500 cursor-not-allowed' : `bg-white text-black hover:scale-105 active:scale-95`}`}
+              className={`px-10 py-4 rounded-2xl font-black uppercase tracking-widest text-xs flex items-center gap-3 transition-all ${isGenerating ? 'bg-white/10 text-gray-500 cursor-not-allowed' : 'bg-white text-black hover:scale-105 active:scale-95 shadow-lg shadow-white/5'}`}
             >
               {isGenerating ? <i className="fas fa-circle-notch fa-spin"></i> : <i className="fas fa-bolt"></i>}
               {isGenerating ? 'Synthesizing...' : 'Ignite Forge'}
@@ -171,8 +182,8 @@ const CreationStudio: React.FC<CreationStudioProps> = ({ onClose, onAssetGenerat
 
           {isGenerating && (
             <div className="p-8 border border-white/5 bg-white/[0.02] rounded-[2rem] animate-pulse">
-              <div className="flex items-center gap-4 text-blue-400 font-mono text-[10px] uppercase tracking-[0.2em]">
-                <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping"></div>
+              <div className="flex items-center gap-4 font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: themePrimary }}>
+                <div className="w-2 h-2 rounded-full animate-ping" style={{ backgroundColor: themePrimary }}></div>
                 {statusMessage}
               </div>
             </div>

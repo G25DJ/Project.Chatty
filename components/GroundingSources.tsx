@@ -1,12 +1,6 @@
 import React from 'react';
-import { GroundingSource } from '../types';
 
-interface GroundingSourcesProps {
-  sources: GroundingSource[];
-  themePrimary: string;
-}
-
-const GroundingSources: React.FC<GroundingSourcesProps> = ({ sources, themePrimary }) => {
+const GroundingSources = ({ sources, themePrimary }) => {
   if (!sources || sources.length === 0) return null;
 
   return (
@@ -20,7 +14,8 @@ const GroundingSources: React.FC<GroundingSourcesProps> = ({ sources, themePrima
           href={source.uri}
           target="_blank"
           rel="noopener noreferrer"
-          className={`flex items-center gap-2 px-3 py-2 bg-white/5 border border-white/5 rounded-xl text-[10px] font-bold uppercase tracking-wider text-gray-400 hover:text-white hover:border-${themePrimary} hover:bg-white/10 transition-all group`}
+          className="flex items-center gap-2 px-3 py-2 bg-white/5 border border-white/5 rounded-xl text-[10px] font-bold uppercase tracking-wider text-gray-400 hover:text-white hover:border-[var(--theme-primary)] hover:bg-white/10 transition-all group"
+          style={{ '--hover-border': themePrimary } as any}
         >
           <i className="fas fa-link text-[8px] group-hover:scale-110 transition-transform"></i>
           <span className="max-w-[140px] truncate">{source.title || 'Uplink Source'}</span>

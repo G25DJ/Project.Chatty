@@ -4,81 +4,101 @@ interface IntroSequenceProps {
   onComplete: () => void;
 }
 
+const LOGS = [
+  "LINKING NEURAL PATHWAYS...",
+  "SYNCHRONIZING BIO-SEGMENT...",
+  "BYPASSING SECURITY OVERRIDE...",
+  "CHARTING TEMPORAL COORDINATES...",
+  "PROJECT CHATTY ONLINE."
+];
+
 const IntroSequence: React.FC<IntroSequenceProps> = ({ onComplete }) => {
   const [stage, setStage] = useState(0);
+  const [currentLog, setCurrentLog] = useState(0);
 
   useEffect(() => {
     const timers = [
-      setTimeout(() => setStage(1), 500),   // Bubbles appear
-      setTimeout(() => setStage(2), 1500),  // "PROJECT CHATTY" appears
-      setTimeout(() => setStage(3), 3500),  // Full logo + dots
-      setTimeout(() => setStage(4), 5000),  // Transition to black
-      setTimeout(() => onComplete(), 5800)  // Exit
+      setTimeout(() => setStage(1), 500),   // Singularity ignition
+      setTimeout(() => setStage(2), 2000),  // Typography focus
+      setTimeout(() => setStage(3), 4000),  // System logs begin
+      setTimeout(() => setStage(4), 6500),  // White-out burst
+      setTimeout(() => onComplete(), 7200)  // Exit to app
     ];
+
     return () => timers.forEach(clearTimeout);
   }, [onComplete]);
 
+  useEffect(() => {
+    if (stage === 3) {
+      const logInterval = setInterval(() => {
+        setCurrentLog(prev => (prev < LOGS.length - 1 ? prev + 1 : prev));
+      }, 400);
+      return () => clearInterval(logInterval);
+    }
+  }, [stage]);
+
   return (
-    <div className={`fixed inset-0 z-[1000] flex items-center justify-center overflow-hidden font-sans transition-colors duration-1000 ${stage === 4 ? 'bg-[#02020a]' : 'bg-[#f8f9fa]'}`}>
-      {/* Floating Background Bubbles */}
-      <div className="absolute inset-0 opacity-40">
-        <div className="absolute top-[20%] left-[15%] w-12 h-12 bg-blue-400/20 rounded-full blur-xl animate-bounce"></div>
-        <div className="absolute bottom-[25%] right-[20%] w-24 h-24 bg-purple-400/10 rounded-full blur-2xl animate-pulse"></div>
-        <div className="absolute top-[60%] left-[40%] w-8 h-8 bg-orange-400/20 rounded-full blur-lg animate-bounce delay-700"></div>
+    <div className={`fixed inset-0 z-[1000] flex flex-col items-center justify-center overflow-hidden transition-all duration-1000 bg-[#02020a]`}>
+      
+      {/* Radiant Singularity Core */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div 
+          className={`relative transition-all duration-[2000ms] ease-out
+            ${stage >= 1 ? 'w-[60vw] h-[60vw] opacity-100' : 'w-0 h-0 opacity-0'}
+          `}
+          style={{
+            background: 'radial-gradient(circle, rgba(59,130,246,0.8) 0%, rgba(139,92,246,0.4) 30%, transparent 70%)',
+            filter: 'blur(60px)',
+            animation: stage >= 1 ? 'singularity-expand 4s forwards, core-pulse 2s infinite alternate ease-in-out' : 'none'
+          }}
+        />
+        {/* Secondary radiant layer */}
+        <div 
+          className={`absolute transition-all duration-[3000ms] ease-out
+            ${stage >= 1 ? 'w-[40vw] h-[40vw] opacity-60 scale-150' : 'w-0 h-0 opacity-0'}
+          `}
+          style={{
+            background: 'radial-gradient(circle, rgba(16,185,129,0.5) 0%, transparent 60%)',
+            filter: 'blur(80px)',
+            animation: stage >= 1 ? 'core-pulse 3s infinite alternate-reverse ease-in-out' : 'none'
+          }}
+        />
       </div>
 
-      <div className="relative flex flex-col items-center">
-        {/* Animated Speech Bubbles */}
-        <div className={`flex gap-6 mb-12 transition-all duration-1000 transform ${stage >= 1 ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-50 translate-y-10'}`}>
-          <div className="relative w-28 h-24 bg-gradient-to-br from-blue-400 to-indigo-600 rounded-[2.5rem] shadow-2xl flex items-center justify-center animate-float">
-            <div className="w-14 h-1.5 bg-white/30 rounded-full mb-1"></div>
-            <div className="absolute -bottom-2 -left-2 w-8 h-8 bg-indigo-600 rounded-bl-full shadow-lg"></div>
-            <i className="fas fa-comment text-white/10 absolute text-5xl"></i>
-          </div>
-          <div className="relative w-24 h-20 bg-gradient-to-tr from-rose-400 to-orange-500 rounded-[2rem] shadow-xl mt-6 flex items-center justify-center animate-float [animation-delay:1s]">
-            <div className="w-10 h-1 bg-white/30 rounded-full"></div>
-            <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-orange-500 rounded-br-full shadow-lg"></div>
-          </div>
-        </div>
-
-        {/* Logo Text */}
-        <div className="relative flex flex-col items-center">
-          <div className={`flex items-baseline transition-all duration-1000 transform ${stage >= 2 ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-20'}`}>
-            <span className="text-6xl md:text-9xl font-black tracking-tighter text-gray-500/80 drop-shadow-2xl uppercase">PROJECT</span>
-            <div className="flex ml-6">
-              {'CHATTY'.split('').map((char, i) => {
-                const colors = ['text-blue-500', 'text-red-500', 'text-yellow-500', 'text-blue-500', 'text-green-500', 'text-red-500'];
-                return (
-                  <span 
-                    key={i} 
-                    className={`${colors[i % colors.length]} text-6xl md:text-9xl font-black transition-all duration-700 transform ${stage >= 2 ? 'scale-100 rotate-0' : 'scale-0 rotate-12'}`}
-                    style={{ transitionDelay: `${i * 100}ms` }}
-                  >
-                    {char}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-          
-          <div className={`mt-4 transition-all duration-1000 ${stage >= 3 ? 'opacity-100 scale-110' : 'opacity-0 scale-50'}`}>
-            <span className="text-5xl md:text-7xl font-black text-gray-400 tracking-[0.5em] animate-pulse">...</span>
+      {/* Radiant Typography */}
+      <div className="relative z-10 flex flex-col items-center text-center px-6">
+        <h1 
+          className={`text-3xl md:text-5xl lg:text-7xl font-black uppercase transition-all duration-[1500ms]
+            ${stage >= 2 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-12 scale-110'}
+          `}
+          style={{
+            animation: stage >= 2 ? 'text-focus-in 1.5s ease-out forwards' : 'none',
+            letterSpacing: '0.5em',
+            textShadow: '0 0 30px rgba(255,255,255,0.4)'
+          }}
+        >
+          PROJECT <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-white to-emerald-400">CHATTY</span>
+        </h1>
+        
+        <div className={`mt-12 overflow-hidden transition-opacity duration-500 ${stage >= 3 ? 'opacity-100' : 'opacity-0'}`}>
+          <div className="flex flex-col gap-2 items-center">
+             <div className="h-[2px] w-24 bg-gradient-to-r from-transparent via-white/40 to-transparent"></div>
+             <p className="text-[10px] lg:text-[12px] font-mono text-white/50 tracking-[0.4em] h-4">
+                {LOGS[currentLog]}
+             </p>
           </div>
         </div>
-
-        {/* Floating Particles/Bubbles like in video */}
-        {stage >= 2 && (
-          <div className="absolute inset-0 pointer-events-none overflow-visible">
-            <div className="absolute -top-20 -right-40 w-12 h-12 rounded-full bg-blue-300/30 blur-md animate-ping"></div>
-            <div className="absolute top-40 -left-48 w-16 h-16 rounded-full bg-red-300/20 blur-lg animate-pulse"></div>
-            <div className="absolute -bottom-20 left-20 w-8 h-8 rounded-full bg-green-300/30 blur-sm animate-bounce"></div>
-            <div className="absolute bottom-40 right-40 w-10 h-10 rounded-full bg-yellow-300/20 blur-md animate-pulse [animation-delay:0.5s]"></div>
-          </div>
-        )}
       </div>
 
-      {/* Screen Overlay for final transition */}
-      <div className={`absolute inset-0 bg-[#02020a] transition-opacity duration-1000 pointer-events-none ${stage === 4 ? 'opacity-100' : 'opacity-0'}`}></div>
+      {/* Supernova White-out Transition */}
+      <div 
+        className={`absolute inset-0 bg-white z-[1100] transition-opacity duration-[1000ms] pointer-events-none
+          ${stage === 4 ? 'opacity-100' : 'opacity-0'}
+        `}
+      />
+
+      {/* CRT Overlay Effect */}
+      <div className="absolute inset-0 pointer-events-none z-[1050] opacity-20 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_2px,3px_100%]"></div>
     </div>
   );
 };

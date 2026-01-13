@@ -37,7 +37,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-[150] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-4 lg:p-8">
-      <div className={`w-full ${isTV ? 'max-w-6xl p-20' : 'max-w-4xl p-12'} bg-[#02020a] border border-white/10 ${isTV ? 'rounded-[6rem]' : 'rounded-[4rem]'} relative overflow-y-auto max-h-[90vh] scrollbar-thin`}>
+      <div className={`w-full ${isTV ? 'max-w-6xl p-20' : 'max-w-4xl p-12'} bg-[#02020a] border border-white/10 ${isTV ? 'rounded-[6rem]' : 'rounded-[4rem]'} relative overflow-y-auto max-h-[90vh] scrollbar-thin shadow-2xl shadow-[var(--theme-primary)]/10`}>
         <button onClick={onClose} className="absolute top-8 right-8 lg:top-12 lg:right-12 text-gray-700 hover:text-white text-2xl">
           <i className="fas fa-times"></i>
         </button>
@@ -45,12 +45,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className={`grid grid-cols-1 ${isWearable ? '' : 'lg:grid-cols-2'} gap-8 lg:gap-12`}>
           <section className="space-y-8 lg:space-y-12">
             <div className="space-y-4">
-              <label className="text-[10px] font-black text-gray-600 uppercase tracking-widest">Assistant Designation</label>
+              <label className="text-[10px] font-black text-gray-600 uppercase tracking-widest">Assistant Username</label>
               <input 
                 type="text" 
                 value={prefs.assistantName} 
                 onChange={(e) => setPrefs(p => ({ ...p, assistantName: e.target.value }))} 
-                className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 font-black text-xl" 
+                className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 font-black text-xl focus:border-[var(--theme-primary)] transition-colors outline-none" 
               />
             </div>
             <div className="space-y-4">
@@ -59,7 +59,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 {voices.map(v => (
                   <div 
                     key={v.id} 
-                    className={`flex items-center justify-between px-4 py-3 rounded-2xl border-2 transition-all group ${prefs.voiceId === v.id ? 'bg-blue-500/10 border-blue-500' : 'bg-white/5 border-white/5 hover:border-white/10'}`}
+                    className={`flex items-center justify-between px-4 py-3 rounded-2xl border-2 transition-all group ${prefs.voiceId === v.id ? 'bg-[var(--theme-primary)]/10 border-[var(--theme-primary)]' : 'bg-white/5 border-white/5 hover:border-white/10'}`}
                   >
                     <button 
                       onClick={() => setPrefs(pr => ({ ...pr, voiceId: v.id }))} 
@@ -77,7 +77,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="flex items-center gap-2">
                       <button 
                         onClick={(e) => { e.stopPropagation(); onPreviewVoice?.(v.id); }}
-                        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${previewingVoiceId === v.id ? 'bg-blue-500 text-white animate-pulse' : 'bg-white/5 text-gray-600 hover:text-white hover:bg-white/10'}`}
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${previewingVoiceId === v.id ? 'bg-[var(--theme-primary)] text-white animate-pulse' : 'bg-white/5 text-gray-600 hover:text-white hover:bg-white/10'}`}
                         title="Chatty Preview"
                       >
                         {previewingVoiceId === v.id ? (
@@ -86,7 +86,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                           <i className="fas fa-volume-up text-[10px]"></i>
                         )}
                       </button>
-                      {prefs.voiceId === v.id && <i className="fas fa-check-circle text-blue-500 text-xs"></i>}
+                      {prefs.voiceId === v.id && <i className="fas fa-check-circle text-[var(--theme-primary)] text-xs"></i>}
                     </div>
                   </div>
                 ))}
@@ -101,7 +101,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button 
                     key={p} 
                     onClick={() => setPrefs(pr => ({ ...pr, personality: p }))} 
-                    className={`py-4 rounded-xl border-2 transition-all font-black text-[9px] uppercase tracking-widest ${prefs.personality === p ? `bg-blue-500/10 border-blue-500` : 'border-white/5 text-gray-700'}`}
+                    className={`py-4 rounded-xl border-2 transition-all font-black text-[9px] uppercase tracking-widest ${prefs.personality === p ? 'bg-[var(--theme-primary)]/10 border-[var(--theme-primary)] text-[var(--theme-primary)]' : 'border-white/5 text-gray-700 hover:border-white/10'}`}
                   >
                     {p}
                   </button>
@@ -110,19 +110,19 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               
               {prefs.personality === 'custom' && (
                 <div className="mt-6 animate-slide-up space-y-4">
-                  <label className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Behavioral Directives</label>
+                  <label className="text-[10px] font-black text-[var(--theme-primary)] uppercase tracking-widest">Behavioral Directives</label>
                   <textarea 
                     value={prefs.customPersonality} 
                     onChange={(e) => setPrefs(p => ({ ...p, customPersonality: e.target.value }))}
                     placeholder="Instruct the assistant on how to think, act, and respond..."
-                    className="w-full h-32 bg-white/5 border border-white/10 rounded-2xl p-4 text-xs font-mono text-gray-300 focus:outline-none focus:border-blue-500/50 resize-none"
+                    className="w-full h-32 bg-white/5 border border-white/10 rounded-2xl p-4 text-xs font-mono text-gray-300 focus:outline-none focus:border-[var(--theme-primary)]/50 resize-none"
                   />
                 </div>
               )}
             </div>
             {!isWearable && (
-              <div className="p-8 bg-blue-500/5 border border-blue-500/10 rounded-3xl">
-                <p className="text-[10px] text-blue-400 font-black uppercase tracking-widest mb-2 flex items-center gap-2">
+              <div className="p-8 bg-[var(--theme-primary)]/5 border border-[var(--theme-primary)]/10 rounded-3xl">
+                <p className="text-[10px] text-[var(--theme-primary)] font-black uppercase tracking-widest mb-2 flex items-center gap-2">
                   <i className="fas fa-shield-halved"></i> Security Node
                 </p>
                 <p className="text-xs text-gray-500 leading-relaxed">
@@ -134,7 +134,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
         <button 
           onClick={onClose} 
-          className="mt-12 w-full py-6 bg-white text-black font-black uppercase tracking-widest rounded-full hover:scale-[1.02] transition-transform"
+          className="mt-12 w-full py-6 bg-white text-black font-black uppercase tracking-widest rounded-full hover:scale-[1.02] transition-transform shadow-xl shadow-white/5"
         >
           Apply Chatty Configuration
         </button>
