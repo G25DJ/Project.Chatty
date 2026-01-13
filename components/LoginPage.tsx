@@ -11,6 +11,7 @@ const LoginPage = ({ onLogin }) => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+  const [identities, setIdentities] = useState([]);
 
   const getStoredUsers = () => {
     try {
@@ -31,8 +32,9 @@ const LoginPage = ({ onLogin }) => {
   };
 
   useEffect(() => {
-    const users = getStoredUsers();
-    if (Object.keys(users).length === 0) {
+    const storedIdentities = JSON.parse(localStorage.getItem('nova_identities') || '[]');
+    setIdentities(storedIdentities);
+    if (storedIdentities.length === 0) {
       setMode('SIGN_UP');
     }
   }, []);
@@ -46,6 +48,36 @@ const LoginPage = ({ onLogin }) => {
     setMode('VERIFY');
     setError(null);
     setShowPassword(false);
+  };
+
+  const handleDeleteIdentity = (e, nameToDelete) => {
+    e.stopPropagation(); // Prevent card selection
+    if (window.confirm(`TERMINATE IDENTITY: ${nameToDelete}?\n\nThis will permanently purge all encrypted logs, memories, and access credentials. This action is irreversible.`)) {
+      // 1. Remove from credentials
+      const users = getStoredUsers();
+      delete users[nameToDelete];
+      localStorage.setItem('nova_credentials', JSON.stringify(users));
+
+      // 2. Remove from identities list
+      const updatedIdentities = identities.filter(id => id !== nameToDelete);
+      localStorage.setItem('nova_identities', JSON.stringify(updatedIdentities));
+      setIdentities(updatedIdentities);
+
+      // 3. Purge data buckets
+      localStorage.removeItem(`nova_${nameToDelete}_prefs`);
+      localStorage.removeItem(`nova_${nameToDelete}_memories`);
+      localStorage.removeItem(`nova_${nameToDelete}_logs`);
+
+      // 4. Handle persistence
+      if (localStorage.getItem('nova_persistent_user') === nameToDelete) {
+        localStorage.removeItem('nova_persistent_user');
+      }
+
+      // If no identities left, go to sign up
+      if (updatedIdentities.length === 0) {
+        setMode('SIGN_UP');
+      }
+    }
   };
 
   const handleSignUpStart = (e) => {
@@ -75,8 +107,8 @@ const LoginPage = ({ onLogin }) => {
     setTimeout(() => {
       const updatedUsers = { ...users, [username]: password };
       localStorage.setItem('nova_credentials', JSON.stringify(updatedUsers));
-      const identities = JSON.parse(localStorage.getItem('nova_identities') || '[]');
-      localStorage.setItem('nova_identities', JSON.stringify([...new Set([username, ...identities])]));
+      const updatedIdentities = [...new Set([username, ...identities])];
+      localStorage.setItem('nova_identities', JSON.stringify(updatedIdentities));
       
       const defaultVoiceId = genderPref === 'masculine' ? 'Charon' : 'Zephyr';
       
@@ -119,8 +151,6 @@ const LoginPage = ({ onLogin }) => {
     }
   };
 
-  const identities = JSON.parse(localStorage.getItem('nova_identities') || '[]');
-
   return (
     <div className="min-h-screen w-full flex items-center justify-center p-4 lg:p-10 bg-[#02020a] relative overflow-hidden font-sans">
       <div className="w-full max-w-5xl z-10">
@@ -133,17 +163,25 @@ const LoginPage = ({ onLogin }) => {
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-8">
               {identities.map((name) => (
-                <button
-                  key={name}
-                  onClick={() => handleProfileSelect(name)}
-                  className="group relative glass rounded-[2rem] lg:rounded-[3rem] p-6 lg:p-10 transition-all hover:scale-[1.02] text-left"
-                >
-                  <div className="w-12 h-12 lg:w-16 lg:h-16 rounded-2xl lg:rounded-[2rem] bg-blue-600 flex items-center justify-center text-xl lg:text-2xl font-black text-white">{(name || 'U')[0].toUpperCase()}</div>
-                  <div className="mt-6 lg:mt-10">
-                    <p className="text-xl lg:text-2xl font-black text-white truncate">{name}</p>
-                    <p className="text-[8px] lg:text-[10px] text-blue-400 font-black uppercase tracking-widest mt-1">Encrypted</p>
-                  </div>
-                </button>
+                <div key={name} className="relative group">
+                  <button
+                    onClick={() => handleProfileSelect(name)}
+                    className="w-full group relative glass rounded-[2rem] lg:rounded-[3rem] p-6 lg:p-10 transition-all hover:scale-[1.02] text-left overflow-hidden"
+                  >
+                    <div className="w-12 h-12 lg:w-16 lg:h-16 rounded-2xl lg:rounded-[2rem] bg-blue-600 flex items-center justify-center text-xl lg:text-2xl font-black text-white">{(name || 'U')[0].toUpperCase()}</div>
+                    <div className="mt-6 lg:mt-10">
+                      <p className="text-xl lg:text-2xl font-black text-white truncate">{name}</p>
+                      <p className="text-[8px] lg:text-[10px] text-blue-400 font-black uppercase tracking-widest mt-1">Encrypted</p>
+                    </div>
+                  </button>
+                  <button 
+                    onClick={(e) => handleDeleteIdentity(e, name)}
+                    className="absolute top-4 right-4 lg:top-8 lg:right-8 w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-red-500/10 border border-red-500/20 text-red-500/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all hover:bg-red-500 hover:text-white shadow-lg hover:shadow-red-500/20 active:scale-90"
+                    title="Terminate Identity"
+                  >
+                    <i className="fas fa-trash-alt text-[10px] lg:text-xs"></i>
+                  </button>
+                </div>
               ))}
               <button
                 onClick={() => setMode('SIGN_UP')}
