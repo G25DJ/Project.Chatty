@@ -10,8 +10,9 @@ export enum AssistantState {
 
 export type DeviceType = 'wear' | 'mobile' | 'desktop' | 'tv' | 'auto';
 
-export type UITheme = 'cosmic' | 'emerald' | 'ruby' | 'obsidian';
+export type UITheme = 'cosmic' | 'emerald' | 'ruby' | 'obsidian' | 'custom';
 export type PersonalityType = 'professional' | 'friendly' | 'witty' | 'minimalist' | 'alluring' | 'custom';
+export type BackgroundStyle = 'grid' | 'aurora' | 'noise' | 'solid';
 
 export interface GroundingSource {
   title: string;
@@ -59,6 +60,16 @@ export interface UserPreferences {
   assistantName: string;
   assistantProfilePic?: string;
   modality: 'masculine' | 'feminine';
+  
+  // Customization Extensions
+  primaryColor: string;
+  secondaryColor: string;
+  borderRadius: string; 
+  fontFamily: 'Inter' | 'Roboto Mono' | 'Outfit' | 'Bebas Neue';
+  bgStyle: BackgroundStyle;
+  speechSpeed: number; 
+  speechPitch: number; 
+  greeting: string;
 }
 
 export interface AuthUser {
