@@ -25,7 +25,8 @@ export async function decodeAudioData(
   sampleRate: number,
   numChannels: number,
 ): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
+  // Use byteOffset and length for safer construction from raw buffer
+  const dataInt16 = new Int16Array(data.buffer, data.byteOffset, data.byteLength / 2);
   const frameCount = dataInt16.length / numChannels;
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
 
@@ -57,8 +58,8 @@ export function playLinkSound(ctx: AudioContext) {
   osc.type = 'sine';
   osc.frequency.setValueAtTime(440, ctx.currentTime);
   osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.1);
-  gain.gain.setValueAtTime(0.1, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
+  gain.gain.setValueAtTime(0.05, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
   osc.connect(gain);
   gain.connect(ctx.destination);
   osc.start();
@@ -71,7 +72,7 @@ export function playSuccessSound(ctx: AudioContext) {
   osc.type = 'triangle';
   osc.frequency.setValueAtTime(880, ctx.currentTime);
   osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.05);
-  gain.gain.setValueAtTime(0.05, ctx.currentTime);
+  gain.gain.setValueAtTime(0.03, ctx.currentTime);
   gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
   osc.connect(gain);
   gain.connect(ctx.destination);

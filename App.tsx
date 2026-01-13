@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { GoogleGenAI, Modality } from '@google/genai';
 import { AssistantState, DeviceType, SensorData, UserPreferences, GroundingSource, TranscriptionEntry, MemoryEntry } from './types';
@@ -15,7 +16,7 @@ import IntroSequence from './components/IntroSequence';
 const THEMES = {
   cosmic: { primary: '#3b82f6', secondary: '#8b5cf6', glow: 'rgba(59,130,246,0.5)', bg: '#02020a' },
   emerald: { primary: '#10b981', secondary: '#064e3b', glow: 'rgba(16,185,129,0.5)', bg: '#020a05' },
-  ruby: { primary: '#f43f5e', secondary: '#9f1239', glow: 'rgba(244,63,94,0.5)', bg: '#0a0202' },
+  ruby: { primary: '#f43f5e', secondary: '#9f1239', glow: 'rgba(244,130,246,0.5)', bg: '#0a0202' },
   obsidian: { primary: '#94a3b8', secondary: '#1e293b', glow: 'rgba(148,163,184,0.5)', bg: '#0a0a0a' },
   custom: { primary: '#ffffff', secondary: '#ffffff', glow: 'rgba(255,255,255,0.5)', bg: '#02020a' }
 };
@@ -131,7 +132,6 @@ const App = () => {
   const [prefs, setPrefs] = useState<UserPreferences>(DEFAULT_PREFS);
   const [state, setState] = useState<AssistantState>(AssistantState.IDLE);
   const [device, setDevice] = useState<DeviceType>('desktop');
-  const [isScanning, setIsScanning] = useState(true);
   const [sensorData, setSensorData] = useState<SensorData>({ online: navigator.onLine, platform: navigator.platform });
   const [transcriptions, setTranscriptions] = useState<TranscriptionEntry[]>([]);
   const [streamingUserText, setStreamingUserText] = useState('');
@@ -155,6 +155,7 @@ const App = () => {
   const micStreamRef = useRef<MediaStream | null>(null);
   const sessionRef = useRef<any>(null);
   const currentFrameRef = useRef<string | null>(null);
+  const frameIntervalRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
 
@@ -165,7 +166,25 @@ const App = () => {
     return THEMES[prefs.theme] || THEMES.cosmic;
   }, [prefs.theme, prefs.primaryColor, prefs.secondaryColor]);
 
-  // Deep Customization Real-time Injection
+  // Stable frame receiver
+  const handleIncomingFrame = useCallback((base64: string) => {
+    currentFrameRef.current = base64;
+  }, []);
+
+  useEffect(() => {
+    if (user && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setSensorData(prev => ({
+            ...prev,
+            location: { lat: pos.coords.latitude, lng: pos.coords.longitude }
+          }));
+        },
+        () => console.warn("Location uplink denied.")
+      );
+    }
+  }, [user]);
+
   useEffect(() => {
     const root = document.documentElement;
     root.style.setProperty('--theme-primary', themeData.primary);
@@ -257,7 +276,13 @@ const App = () => {
     if (sessionRef.current) { try { sessionRef.current.close?.(); } catch(e){} sessionRef.current = null; }
     if (micStreamRef.current) { micStreamRef.current.getTracks().forEach(t => t.stop()); micStreamRef.current = null; }
     if (scriptProcessorRef.current) { scriptProcessorRef.current.disconnect(); scriptProcessorRef.current = null; }
+    if (audioContextRef.current) {
+        audioContextRef.current.input.close().catch(() => {});
+        audioContextRef.current.output.close().catch(() => {});
+        audioContextRef.current = null;
+    }
     if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); setScreenStream(null); }
+    if (frameIntervalRef.current) { window.clearInterval(frameIntervalRef.current); frameIntervalRef.current = null; }
     activeSourcesRef.current.forEach(s => { try { s.stop(); } catch (e) {} });
     activeSourcesRef.current.clear();
     nextStartTimeRef.current = 0;
@@ -273,26 +298,31 @@ const App = () => {
       setState(AssistantState.CONNECTING);
       const apiKey = process.env.API_KEY;
       if (!apiKey) throw new Error("API Authentication failure.");
-      if (!audioContextRef.current) {
-        audioContextRef.current = {
-          input: new (window.AudioContext || (window as any).webkitAudioContext)(),
-          output: new (window.AudioContext || (window as any).webkitAudioContext)()
-        };
-      }
+      
+      const ai = new GoogleGenAI({ apiKey });
+      
+      audioContextRef.current = {
+        input: new (window.AudioContext || (window as any).webkitAudioContext)(),
+        output: new (window.AudioContext || (window as any).webkitAudioContext)()
+      };
+      
       const { input: inputCtx, output: outputCtx } = audioContextRef.current;
       if (inputCtx.state === 'suspended') await inputCtx.resume();
       if (outputCtx.state === 'suspended') await outputCtx.resume();
+      
       audioUtils.playLinkSound(outputCtx);
+      
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000, channelCount: 1 } 
       });
       micStreamRef.current = stream;
+      
       const source = inputCtx.createMediaStreamSource(stream);
       const analyser = inputCtx.createAnalyser();
       analyser.fftSize = 256;
       analyserRef.current = analyser;
       source.connect(analyser);
-      const ai = new GoogleGenAI({ apiKey });
+      
       const personalityPrompt = prefs.personality === 'custom' ? (prefs.customPersonality || 'Be helpful.') : PERSONALITIES[prefs.personality];
       
       const tools: any[] = [{ functionDeclarations: [saveKnowledgeTool] }];
@@ -300,8 +330,10 @@ const App = () => {
       if (searchEnabled) tools.push({ googleSearch: {} });
 
       const memoryPrompt = memories.length > 0 
-        ? `Long-Term Memory Data: ${memories.map(m => m.fact).join(' | ')}.`
-        : "Long-Term Memory is currently empty. Use 'save_knowledge' to record important user facts.";
+        ? `Knowledge Bank: ${memories.map(m => m.fact).join(' | ')}.`
+        : "Knowledge Bank is empty.";
+
+      const visionContext = isScreenSharing ? "OPTIC_UPLINK: SCREEN_SHARE. You can see the user's workspace/browser. Be proactive in analyzing text and UI elements." : "OPTIC_UPLINK: USER_CAMERA. You are looking at the user/environment.";
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
@@ -310,12 +342,13 @@ const App = () => {
           tools,
           toolConfig: sensorData.location ? { retrievalConfig: { latLng: { latitude: sensorData.location.lat, longitude: sensorData.location.lng } } } : undefined,
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: prefs.voiceId } } },
-          systemInstruction: `Identity: ${prefs.assistantName}. Persona: ${personalityPrompt}. Session Greeting: ${prefs.greeting}. ${memoryPrompt}`,
+          systemInstruction: `Identity: ${prefs.assistantName}. Persona: ${personalityPrompt}. ${memoryPrompt}. ${visionContext} VISUAL_MODE: ACTIVE. Use incoming frames to provide elite assistance. If you see a code snippet or a specific UI detail, acknowledge it.`,
           inputAudioTranscription: {}, outputAudioTranscription: {}, thinkingConfig: { thinkingBudget: 24576 }
         } as any,
         callbacks: {
           onopen: () => {
             setState(AssistantState.LISTENING);
+            
             const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
             scriptProcessorRef.current = scriptProcessor;
             scriptProcessor.onaudioprocess = (e) => {
@@ -324,26 +357,39 @@ const App = () => {
               for (let i = 0; i < inputData.length; i++) int16[i] = inputData[i] * 32768;
               const pcmBlob = { data: audioUtils.encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' };
               sessionPromise.then(s => s.sendRealtimeInput({ media: pcmBlob }));
-              if (currentFrameRef.current) {
-                const frame = currentFrameRef.current;
-                currentFrameRef.current = null;
-                sessionPromise.then(s => s.sendRealtimeInput({ media: { data: frame, mimeType: 'image/jpeg' } }));
-              }
             };
             source.connect(scriptProcessor);
             scriptProcessor.connect(inputCtx.destination);
+            
+            // Synchronized Multimodal Uplink Loop (matches Vision components frequency)
+            frameIntervalRef.current = window.setInterval(() => {
+              if (currentFrameRef.current) {
+                const frameData = currentFrameRef.current;
+                currentFrameRef.current = null;
+                sessionPromise.then(s => s.sendRealtimeInput({ 
+                  media: { data: frameData, mimeType: 'image/jpeg' } 
+                }));
+              }
+            }, 500); 
             
             const initialMsg = initialText || prefs.greeting;
             sessionPromise.then(s => s.sendRealtimeInput({ text: initialMsg }));
             if (initialText) addTranscription('user', initialText);
           },
           onmessage: async (message: any) => {
+            if (message.serverContent?.interrupted) {
+              activeSourcesRef.current.forEach(s => { try { s.stop(); } catch(e){} });
+              activeSourcesRef.current.clear();
+              nextStartTimeRef.current = 0;
+              setState(AssistantState.LISTENING);
+            }
+
             if (message.toolCall) {
               for (const fc of message.toolCall.functionCalls) {
                 if (fc.name === 'save_knowledge') {
                   const newMemory = { id: Math.random().toString(36).substr(2, 9), fact: fc.args.fact, timestamp: new Date() };
                   setMemories(p => [...p, newMemory]);
-                  sessionPromise.then(s => s.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: { result: "Fact successfully archived in bio-core." } } }));
+                  sessionPromise.then(s => s.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: { result: "Memory archived." } } }));
                 }
               }
             }
@@ -358,7 +404,10 @@ const App = () => {
                 s.playbackRate.value = prefs.speechSpeed;
                 s.detune.value = (prefs.speechPitch - 1.0) * 1200; 
                 s.connect(outputCtx.destination);
-                s.onended = () => { activeSourcesRef.current.delete(s); if (activeSourcesRef.current.size === 0) setState(AssistantState.LISTENING); };
+                s.onended = () => { 
+                  activeSourcesRef.current.delete(s); 
+                  if (activeSourcesRef.current.size === 0) setState(AssistantState.LISTENING); 
+                };
                 s.start(nextStartTimeRef.current); 
                 nextStartTimeRef.current += (buffer.duration / prefs.speechSpeed); 
                 activeSourcesRef.current.add(s);
@@ -373,50 +422,31 @@ const App = () => {
               setStreamingAssistantText(a => { if (a) { addTranscription('assistant', a, sources); audioUtils.playSuccessSound(outputCtx); } return ''; });
             }
           },
-          onerror: () => stopSession(), onclose: () => stopSession()
+          onerror: async (err: any) => {
+            console.error("Session Critical:", err);
+            if (err?.message?.includes("Requested entity was not found") && window.aistudio) {
+              await window.aistudio.openSelectKey();
+            }
+            stopSession();
+          }, 
+          onclose: () => stopSession()
         }
       });
       sessionRef.current = await sessionPromise;
-    } catch (err: any) { setErrorToast(err.message); setState(AssistantState.IDLE); setTimeout(() => setErrorToast(null), 5000); }
-  };
-
-  const handlePreviewVoice = async (voiceId: string) => {
-    if (previewingVoiceId) return;
-    try {
-      setPreviewingVoiceId(voiceId);
-      const apiKey = process.env.API_KEY;
-      if (!apiKey) return;
-      if (!audioContextRef.current) audioContextRef.current = { input: new AudioContext(), output: new AudioContext() };
-      const outputCtx = audioContextRef.current.output;
-      if (outputCtx.state === 'suspended') await outputCtx.resume();
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: `Vocal link check. Current speed ${prefs.speechSpeed}. Pitch ${prefs.speechPitch}.` }] }],
-        config: { 
-          responseModalities: [Modality.AUDIO], 
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceId } } } 
-        },
-      });
-      const data = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
-      if (data) {
-        const buffer = await audioUtils.decodeAudioData(audioUtils.decode(data), outputCtx, 24000, 1);
-        const s = outputCtx.createBufferSource();
-        s.buffer = buffer;
-        s.playbackRate.value = prefs.speechSpeed;
-        s.detune.value = (prefs.speechPitch - 1.0) * 1200;
-        s.connect(outputCtx.destination);
-        s.onended = () => setPreviewingVoiceId(null);
-        s.start(0);
-      } else setPreviewingVoiceId(null);
-    } catch (e) { setPreviewingVoiceId(null); }
+    } catch (err: any) { 
+      if (err?.message?.includes("Requested entity was not found") && window.aistudio) {
+          await window.aistudio.openSelectKey();
+      }
+      setErrorToast(err.message); 
+      setState(AssistantState.IDLE); 
+      setTimeout(() => setErrorToast(null), 5000); 
+    }
   };
 
   const handleSendText = useCallback(() => {
     if (!inputText.trim()) return;
     const text = inputText.trim();
     setInputText('');
-
     if (state === AssistantState.IDLE) {
       startSession(text);
     } else if (sessionRef.current) {
@@ -425,8 +455,80 @@ const App = () => {
     }
   }, [inputText, state, addTranscription]);
 
-  const handleLogin = (username: string, initialPrefs: any) => {
-    setUser({ username, preferences: { ...DEFAULT_PREFS, ...initialPrefs } });
+  const handleToggleVision = async () => {
+    if (isVisionActive) {
+      setIsVisionActive(false);
+    } else {
+      try {
+        await navigator.mediaDevices.getUserMedia({ video: true });
+        setIsScreenSharing(false);
+        setIsVisionActive(true);
+        if (state === AssistantState.IDLE) startSession();
+        else {
+           stopSession();
+           setTimeout(() => { setIsVisionActive(true); startSession(); }, 600);
+        }
+      } catch (err) { setErrorToast("Optic hardware link failed."); }
+    }
+  };
+
+  const handleToggleScreenShare = async () => {
+    if (isScreenSharing) {
+      setIsScreenSharing(false);
+      if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); setScreenStream(null); }
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        setScreenStream(stream);
+        setIsVisionActive(false);
+        setIsScreenSharing(true);
+        if (state === AssistantState.IDLE) startSession();
+        else {
+           stopSession();
+           setTimeout(() => { 
+             setScreenStream(stream);
+             setIsScreenSharing(true); 
+             startSession(); 
+           }, 600);
+        }
+        stream.getVideoTracks()[0].onended = () => { setIsScreenSharing(false); setScreenStream(null); };
+      } catch (err) { setErrorToast("Uplink negotiation aborted."); }
+    }
+  };
+
+  const handleLogin = (username: string, preferences: UserPreferences) => {
+    setUser({ username, preferences });
+  };
+
+  const handlePreviewVoice = async (voiceId: string) => {
+    if (previewingVoiceId) return;
+    setPreviewingVoiceId(voiceId);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-preview-tts",
+        contents: [{ parts: [{ text: `Link nominal.` }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceId } } },
+        },
+      });
+
+      const outputCtx = audioContextRef.current?.output || new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (outputCtx.state === 'suspended') await outputCtx.resume();
+
+      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (base64Audio) {
+        const audioBuffer = await audioUtils.decodeAudioData(audioUtils.decode(base64Audio), outputCtx, 24000, 1);
+        const source = outputCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(outputCtx.destination);
+        source.onended = () => setPreviewingVoiceId(null);
+        source.start();
+      } else { setPreviewingVoiceId(null); }
+    } catch (err) {
+      setPreviewingVoiceId(null);
+    }
   };
 
   if (showIntro) return <IntroSequence onComplete={() => setShowIntro(false)} />;
@@ -452,25 +554,39 @@ const App = () => {
       </header>
 
       <main className={`flex-1 flex p-[var(--ui-gap)] gap-[var(--ui-gap)] overflow-hidden`}>
-        <div className="flex-1 flex flex-col glass rounded-[var(--ui-radius)] overflow-hidden relative shadow-2xl">
-          <div className={`flex-1 p-4 lg:p-8 space-y-4 lg:space-y-8 overflow-y-auto scrollbar-thin transcription-list`} ref={scrollRef}>
-            <TranscriptionList transcriptions={transcriptions} deleteTranscription={deleteTranscription} themePrimary={themeData.primary} />
-            {(streamingAssistantText || state === AssistantState.THINKING) && (
-              <div className="items-start flex flex-col animate-pop">
-                <div className="max-w-[85%] px-5 py-3 rounded-[var(--bubble-radius)] bg-white/[0.03] text-white/60 border border-white/5">
-                  {streamingAssistantText ? <p className="font-mono text-xs lg:text-sm leading-relaxed">{streamingAssistantText}</p> : <div className="typing-indicator"><span></span><span></span><span></span></div>}
+        <div className="flex-1 flex flex-col gap-[var(--ui-gap)] min-h-0">
+          
+          {(isVisionActive || isScreenSharing) && (
+            <div className="h-48 md:h-72 lg:h-[400px] w-full animate-pop flex-shrink-0 relative group">
+              {isVisionActive && <ObservationMode isActive={isVisionActive} onFrame={handleIncomingFrame} />}
+              {isScreenSharing && screenStream && <ScreenShareMode isActive={isScreenSharing} stream={screenStream} onFrame={handleIncomingFrame} onStop={() => setIsScreenSharing(false)} />}
+            </div>
+          )}
+
+          <div className="flex-1 flex flex-col glass rounded-[var(--ui-radius)] overflow-hidden relative shadow-2xl min-h-0">
+            <div className={`flex-1 p-4 lg:p-8 space-y-4 lg:space-y-8 overflow-y-auto scrollbar-thin transcription-list`} ref={scrollRef}>
+              <TranscriptionList transcriptions={transcriptions} deleteTranscription={deleteTranscription} themePrimary={themeData.primary} />
+              {(streamingAssistantText || state === AssistantState.THINKING) && (
+                <div className="items-start flex flex-col animate-pop">
+                  <div className="max-w-[85%] px-5 py-3 rounded-[var(--bubble-radius)] bg-white/[0.03] text-white/60 border border-white/5">
+                    {streamingAssistantText ? <p className="font-mono text-xs lg:text-sm leading-relaxed">{streamingAssistantText}</p> : <div className="typing-indicator"><span></span><span></span><span></span></div>}
+                  </div>
                 </div>
+              )}
+            </div>
+            <div className="p-4 lg:p-8 border-t border-white/5 bg-black/50 backdrop-blur-2xl flex flex-col gap-3 lg:gap-6">
+              <VoiceVisualizer state={state} analyser={analyserRef.current || undefined} />
+              <div className="flex gap-3 items-center">
+                  <div className="flex gap-2">
+                    <button onClick={handleToggleVision} className={`w-10 h-10 lg:w-14 lg:h-14 rounded-xl flex items-center justify-center transition-all active:scale-90 ${isVisionActive ? 'bg-red-500 text-white animate-pulse shadow-lg shadow-red-500/20' : 'bg-white/5 text-gray-400 hover:text-white'}`} title="Optic Link"><i className="fas fa-camera text-sm lg:text-lg"></i></button>
+                    <button onClick={handleToggleScreenShare} className={`w-10 h-10 lg:w-14 lg:h-14 rounded-xl flex items-center justify-center transition-all active:scale-90 ${isScreenSharing ? 'bg-cyan-500 text-white animate-pulse shadow-lg shadow-cyan-500/20' : 'bg-white/5 text-gray-400 hover:text-white'}`} title="Screen Uplink"><i className="fas fa-desktop text-sm lg:text-lg"></i></button>
+                  </div>
+                  <input type="text" value={inputText} onChange={(e) => setInputText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSendText()} placeholder="Directive..." className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 lg:px-6 py-3 lg:py-5 text-sm lg:text-lg focus:outline-none focus:border-[var(--theme-primary)]/50 text-white font-bold" />
+                  <button onClick={inputText.trim() ? handleSendText : (state === AssistantState.IDLE ? () => startSession() : stopSession)} className={`flex-1 md:flex-none md:w-48 lg:w-64 h-14 lg:h-20 rounded-[var(--ui-radius)] flex items-center justify-center transition-all gap-2 lg:gap-4 neo-button shadow-2xl ${state === AssistantState.IDLE ? 'bg-white text-black' : 'bg-red-600 text-white animate-pulse'}`}>
+                    <i className={`fas ${inputText.trim() ? 'fa-paper-plane' : (state === AssistantState.IDLE ? 'fa-bolt' : 'fa-square')} text-sm lg:text-lg`}></i>
+                    <span className="font-black uppercase tracking-widest text-[8px] lg:text-[11px]">{inputText.trim() ? 'SEND' : (state === AssistantState.IDLE ? 'IGNITE' : 'HALT')}</span>
+                  </button>
               </div>
-            )}
-          </div>
-          <div className="p-4 lg:p-8 border-t border-white/5 bg-black/50 backdrop-blur-2xl flex flex-col gap-3 lg:gap-6">
-            <VoiceVisualizer state={state} analyser={analyserRef.current || undefined} />
-            <div className="flex gap-3 items-center">
-                <input type="text" value={inputText} onChange={(e) => setInputText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSendText()} placeholder="Directive..." className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 lg:px-6 py-3 lg:py-5 text-sm lg:text-lg focus:outline-none focus:border-[var(--theme-primary)]/50 text-white font-bold" />
-                <button onClick={inputText.trim() ? handleSendText : (state === AssistantState.IDLE ? () => startSession() : stopSession)} className={`flex-1 md:flex-none md:w-48 lg:w-64 h-14 lg:h-20 rounded-[var(--ui-radius)] flex items-center justify-center transition-all gap-2 lg:gap-4 neo-button shadow-2xl ${state === AssistantState.IDLE ? 'bg-white text-black' : 'bg-red-600 text-white animate-pulse'}`}>
-                  <i className={`fas ${inputText.trim() ? 'fa-paper-plane' : (state === AssistantState.IDLE ? 'fa-bolt' : 'fa-square')} text-sm lg:text-lg`}></i>
-                  <span className="font-black uppercase tracking-widest text-[8px] lg:text-[11px]">{inputText.trim() ? 'SEND' : (state === AssistantState.IDLE ? 'IGNITE' : 'HALT')}</span>
-                </button>
             </div>
           </div>
         </div>
@@ -481,7 +597,7 @@ const App = () => {
               memories={memories} 
               onRemove={(id) => setMemories(p => p.filter(m => m.id !== id))} 
               onAdd={(fact) => setMemories(p => [...p, { id: Math.random().toString(36).substr(2, 9), fact, timestamp: new Date() }])}
-              onPurge={() => { if(window.confirm("Purge bio-core memory completely?")) setMemories([]); }}
+              onPurge={() => { if(window.confirm("Purge memory?")) setMemories([]); }}
               assistantName={prefs.assistantName} 
             />
           </div>
@@ -489,6 +605,12 @@ const App = () => {
       </main>
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} prefs={prefs} setPrefs={setPrefs} voices={dynamicVoices} personalities={PERSONALITIES} isTV={false} isWearable={false} onPreviewVoice={handlePreviewVoice} previewingVoiceId={previewingVoiceId} />
+      
+      {errorToast && (
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-red-600 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-2xl animate-shake z-[200]">
+          <i className="fas fa-exclamation-triangle mr-3"></i> {errorToast}
+        </div>
+      )}
     </div>
   );
 };
