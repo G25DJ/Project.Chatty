@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { GoogleGenAI, Modality } from '@google/genai';
 import { AssistantState, DeviceType, SensorData, UserPreferences, GroundingSource, TranscriptionEntry, MemoryEntry } from './types';
@@ -166,7 +165,6 @@ const App = () => {
     return THEMES[prefs.theme] || THEMES.cosmic;
   }, [prefs.theme, prefs.primaryColor, prefs.secondaryColor]);
 
-  // Stable frame receiver
   const handleIncomingFrame = useCallback((base64: string) => {
     currentFrameRef.current = base64;
   }, []);
@@ -301,9 +299,10 @@ const App = () => {
       
       const ai = new GoogleGenAI({ apiKey });
       
+      // CRITICAL: Explicitly set sample rates to match Gemini Live SDK requirements
       audioContextRef.current = {
-        input: new (window.AudioContext || (window as any).webkitAudioContext)(),
-        output: new (window.AudioContext || (window as any).webkitAudioContext)()
+        input: new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 }),
+        output: new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 })
       };
       
       const { input: inputCtx, output: outputCtx } = audioContextRef.current;
@@ -313,7 +312,12 @@ const App = () => {
       audioUtils.playLinkSound(outputCtx);
       
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000, channelCount: 1 } 
+        audio: { 
+          echoCancellation: true, 
+          noiseSuppression: true, 
+          autoGainControl: true,
+          channelCount: 1 
+        } 
       });
       micStreamRef.current = stream;
       
@@ -333,7 +337,7 @@ const App = () => {
         ? `Knowledge Bank: ${memories.map(m => m.fact).join(' | ')}.`
         : "Knowledge Bank is empty.";
 
-      const visionContext = isScreenSharing ? "OPTIC_UPLINK: SCREEN_SHARE. You can see the user's workspace/browser. Be proactive in analyzing text and UI elements." : "OPTIC_UPLINK: USER_CAMERA. You are looking at the user/environment.";
+      const visionContext = isScreenSharing ? "OPTIC_UPLINK: SCREEN_SHARE." : "OPTIC_UPLINK: USER_CAMERA.";
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
@@ -342,7 +346,7 @@ const App = () => {
           tools,
           toolConfig: sensorData.location ? { retrievalConfig: { latLng: { latitude: sensorData.location.lat, longitude: sensorData.location.lng } } } : undefined,
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: prefs.voiceId } } },
-          systemInstruction: `Identity: ${prefs.assistantName}. Persona: ${personalityPrompt}. ${memoryPrompt}. ${visionContext} VISUAL_MODE: ACTIVE. Use incoming frames to provide elite assistance. If you see a code snippet or a specific UI detail, acknowledge it.`,
+          systemInstruction: `Identity: ${prefs.assistantName}. Persona: ${personalityPrompt}. ${memoryPrompt}. ${visionContext} VISUAL_MODE: ACTIVE. Use frames for context. HEARING_MODE: ACTIVE. Respond naturally.`,
           inputAudioTranscription: {}, outputAudioTranscription: {}, thinkingConfig: { thinkingBudget: 24576 }
         } as any,
         callbacks: {
@@ -353,15 +357,12 @@ const App = () => {
             scriptProcessorRef.current = scriptProcessor;
             scriptProcessor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
-              const int16 = new Int16Array(inputData.length);
-              for (let i = 0; i < inputData.length; i++) int16[i] = inputData[i] * 32768;
-              const pcmBlob = { data: audioUtils.encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' };
+              const pcmBlob = audioUtils.createPcmBlob(inputData);
               sessionPromise.then(s => s.sendRealtimeInput({ media: pcmBlob }));
             };
             source.connect(scriptProcessor);
             scriptProcessor.connect(inputCtx.destination);
             
-            // Synchronized Multimodal Uplink Loop (matches Vision components frequency)
             frameIntervalRef.current = window.setInterval(() => {
               if (currentFrameRef.current) {
                 const frameData = currentFrameRef.current;
@@ -566,9 +567,11 @@ const App = () => {
           <div className="flex-1 flex flex-col glass rounded-[var(--ui-radius)] overflow-hidden relative shadow-2xl min-h-0">
             <div className={`flex-1 p-4 lg:p-8 space-y-4 lg:space-y-8 overflow-y-auto scrollbar-thin transcription-list`} ref={scrollRef}>
               <TranscriptionList transcriptions={transcriptions} deleteTranscription={deleteTranscription} themePrimary={themeData.primary} />
-              {(streamingAssistantText || state === AssistantState.THINKING) && (
+              {(streamingAssistantText || streamingUserText || state === AssistantState.THINKING) && (
                 <div className="items-start flex flex-col animate-pop">
                   <div className="max-w-[85%] px-5 py-3 rounded-[var(--bubble-radius)] bg-white/[0.03] text-white/60 border border-white/5">
+                    {streamingUserText && <p className="text-[10px] text-blue-400 font-black uppercase mb-1 opacity-50">Transcribing User...</p>}
+                    {streamingUserText && <p className="mb-3 text-sm italic">"{streamingUserText}"</p>}
                     {streamingAssistantText ? <p className="font-mono text-xs lg:text-sm leading-relaxed">{streamingAssistantText}</p> : <div className="typing-indicator"><span></span><span></span><span></span></div>}
                   </div>
                 </div>

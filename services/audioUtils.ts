@@ -25,7 +25,6 @@ export async function decodeAudioData(
   sampleRate: number,
   numChannels: number,
 ): Promise<AudioBuffer> {
-  // Use byteOffset and length for safer construction from raw buffer
   const dataInt16 = new Int16Array(data.buffer, data.byteOffset, data.byteLength / 2);
   const frameCount = dataInt16.length / numChannels;
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
@@ -39,11 +38,16 @@ export async function decodeAudioData(
   return buffer;
 }
 
+/**
+ * Encodes Float32Array PCM data from a 16000Hz context into a base64 PCM blob.
+ */
 export function createPcmBlob(data: Float32Array): GeminiBlob {
   const l = data.length;
   const int16 = new Int16Array(l);
   for (let i = 0; i < l; i++) {
-    int16[i] = data[i] * 32768;
+    // Clamping to prevent digital clipping
+    const s = Math.max(-1, Math.min(1, data[i]));
+    int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
   }
   return {
     data: encode(new Uint8Array(int16.buffer)),
@@ -51,7 +55,6 @@ export function createPcmBlob(data: Float32Array): GeminiBlob {
   };
 }
 
-// Chatty UI Sounds
 export function playLinkSound(ctx: AudioContext) {
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
