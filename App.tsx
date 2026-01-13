@@ -167,7 +167,8 @@ const App = () => {
   }, [detectHardware]);
 
   useEffect(() => {
-    const sessionUser = sessionStorage.getItem('nova_session_user');
+    // Priority: Session (current tab) -> Persistent (localStorage)
+    const sessionUser = sessionStorage.getItem('nova_session_user') || localStorage.getItem('nova_persistent_user');
     if (sessionUser) {
       try {
         const savedPrefs = localStorage.getItem(`nova_${sessionUser}_prefs`);
@@ -269,6 +270,7 @@ const App = () => {
     stopSession();
     setUser(null);
     sessionStorage.removeItem('nova_session_user');
+    localStorage.removeItem('nova_persistent_user');
   }, [stopSession]);
 
   const handleLogin = (username: string, initialPrefs: any) => {
@@ -525,6 +527,7 @@ const App = () => {
           {!isWearable && (
             <div className="animate-slide-in-right-bounce">
               <h1 className="text-sm lg:text-2xl font-black tracking-tighter text-white uppercase truncate max-w-[120px] lg:max-w-none">{prefs.assistantName}</h1>
+              {/* Fix: use themeData.primary instead of undefined themeColor */}
               {!isMobile && <HardwareSensors data={sensorData} deviceType={device} themeColor={themeData.primary} />}
             </div>
           )}
