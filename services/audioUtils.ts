@@ -39,16 +39,26 @@ export async function decodeAudioData(
 }
 
 /**
- * Encodes Float32Array PCM data from a 16000Hz context into a base64 PCM blob.
+ * Resamples and encodes Float32Array PCM data to 16000Hz base64 PCM blob.
+ * This bridges the gap between hardware native rates and Gemini API requirements.
  */
-export function createPcmBlob(data: Float32Array): GeminiBlob {
-  const l = data.length;
-  const int16 = new Int16Array(l);
-  for (let i = 0; i < l; i++) {
-    // Clamping to prevent digital clipping
-    const s = Math.max(-1, Math.min(1, data[i]));
+export function createPcmBlob(data: Float32Array, inputSampleRate: number): GeminiBlob {
+  const targetSampleRate = 16000;
+  const ratio = inputSampleRate / targetSampleRate;
+  const targetLength = Math.floor(data.length / ratio);
+  
+  const resampledData = new Float32Array(targetLength);
+  for (let i = 0; i < targetLength; i++) {
+    // Basic linear interpolation/sampling
+    resampledData[i] = data[Math.floor(i * ratio)];
+  }
+
+  const int16 = new Int16Array(targetLength);
+  for (let i = 0; i < targetLength; i++) {
+    const s = Math.max(-1, Math.min(1, resampledData[i]));
     int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
   }
+  
   return {
     data: encode(new Uint8Array(int16.buffer)),
     mimeType: 'audio/pcm;rate=16000',

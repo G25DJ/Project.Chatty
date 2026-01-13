@@ -299,9 +299,14 @@ const App = () => {
       
       const ai = new GoogleGenAI({ apiKey });
       
-      // CRITICAL: Explicitly set sample rates to match Gemini Live SDK requirements
+      /**
+       * STABILIZATION FIX: 
+       * We MUST initialize the Input context with NATIVE sample rate to prevent 
+       * "Connecting nodes from different sample-rate" browser error.
+       * Output context remains 24000Hz as it doesn't connect to the mic.
+       */
       audioContextRef.current = {
-        input: new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 }),
+        input: new (window.AudioContext || (window as any).webkitAudioContext)(),
         output: new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 })
       };
       
@@ -357,7 +362,8 @@ const App = () => {
             scriptProcessorRef.current = scriptProcessor;
             scriptProcessor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
-              const pcmBlob = audioUtils.createPcmBlob(inputData);
+              // Manual Resampling happens here inside createPcmBlob
+              const pcmBlob = audioUtils.createPcmBlob(inputData, inputCtx.sampleRate);
               sessionPromise.then(s => s.sendRealtimeInput({ media: pcmBlob }));
             };
             source.connect(scriptProcessor);
