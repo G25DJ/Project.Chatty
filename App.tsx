@@ -199,6 +199,35 @@ const App = () => {
     if (scrollRef.current) scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [transcriptions, streamingUserText, streamingAssistantText]);
 
+  // CHAT BY DAY LOGIC
+  const groupedTranscriptions = useMemo(() => {
+    const groups: Record<string, TranscriptionEntry[]> = {};
+    transcriptions.forEach(entry => {
+      const date = new Date(entry.timestamp);
+      const dateKey = date.toDateString();
+      if (!groups[dateKey]) groups[dateKey] = [];
+      groups[dateKey].push(entry);
+    });
+    return groups;
+  }, [transcriptions]);
+
+  const formatDateHeader = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+
+    if (date.toDateString() === today.toDateString()) return "Today";
+    if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+    
+    return date.toLocaleDateString(undefined, { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+  };
+
   const isWearable = device === 'wear';
   const isAuto = device === 'auto';
   const isTV = device === 'tv';
@@ -210,6 +239,16 @@ const App = () => {
       ...prev, { id: Math.random().toString(36).substr(2, 9), sender, text, timestamp: new Date(), sources }
     ]);
   }, []);
+
+  const deleteTranscription = (id: string) => {
+    setTranscriptions(prev => prev.filter(t => t.id !== id));
+  };
+
+  const clearAllTranscriptions = () => {
+    if (window.confirm("Purge all chat records from this segment?")) {
+      setTranscriptions([]);
+    }
+  };
 
   const stopSession = useCallback(() => {
     if (sessionRef.current) { try { sessionRef.current.close?.(); } catch(e){} sessionRef.current = null; }
@@ -491,6 +530,15 @@ const App = () => {
           )}
         </div>
         <div className="flex items-center gap-2 md:gap-4">
+           {transcriptions.length > 0 && !isWearable && (
+             <button 
+               onClick={clearAllTranscriptions} 
+               className="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 flex items-center justify-center transition-all active:scale-90"
+               title="Clear All History"
+             >
+               <i className="fas fa-trash-sweep text-sm lg:text-lg"></i>
+             </button>
+           )}
            {!isWearable && <button onClick={() => setIsSettingsOpen(true)} className="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-all active:scale-90"><i className="fas fa-cog text-sm lg:text-lg"></i></button>}
            {!isWearable && <button onClick={() => setIsMemoryOpen(!isMemoryOpen)} className={`w-10 h-10 lg:w-12 lg:h-12 rounded-xl flex items-center justify-center transition-all active:scale-90 ${isMemoryOpen ? 'bg-[var(--theme-primary)] text-white shadow-[0_0_30px_rgba(37,99,235,0.4)]' : 'bg-white/5 text-gray-400'}`}><i className="fas fa-brain text-sm lg:text-lg"></i></button>}
            <button onClick={handleLogout} className="w-10 h-10 lg:w-12 lg:h-12 flex items-center justify-center text-gray-600 hover:text-red-500 transition-colors active:scale-90"><i className="fas fa-power-off text-sm lg:text-lg"></i></button>
@@ -518,22 +566,44 @@ const App = () => {
                 </div>
               )}
               
-              {transcriptions.map((e) => (
-                <div key={e.id} className={`flex flex-col ${e.sender === 'user' ? 'items-end' : 'items-start'} animate-slide-up-reveal`}>
-                  <div className={`
-                    max-w-[90%] lg:max-w-[85%] 
-                    px-4 py-3 lg:px-7 lg:py-5 
-                    rounded-[1.5rem] lg:rounded-[2rem] 
-                    shadow-xl transition-transform hover:scale-[1.01]
-                    ${e.sender === 'user' 
-                      ? 'bg-gradient-to-br from-[var(--theme-primary)] to-indigo-600 text-white' 
-                      : 'bg-white/[0.04] text-gray-200 border border-white/5 backdrop-blur-xl'
-                    }
-                  `}>
-                    <p className="text-sm lg:text-lg font-bold leading-relaxed whitespace-pre-wrap">{e.text}</p>
-                    {!isWearable && e.sources && <GroundingSources sources={e.sources} themePrimary={themeData.primary} />}
+              {/* RENDER GROUPED TRANSCRIPTIONS BY DAY */}
+              {Object.entries(groupedTranscriptions).map(([dateStr, items]) => (
+                <React.Fragment key={dateStr}>
+                  <div className="day-separator animate-fade-blur-in">
+                    <div className="day-line"></div>
+                    <div className="day-badge">{formatDateHeader(dateStr)}</div>
+                    <div className="day-line"></div>
                   </div>
-                </div>
+                  
+                  {items.map((e) => (
+                    <div key={e.id} className={`flex flex-col ${e.sender === 'user' ? 'items-end' : 'items-start'} animate-slide-up-reveal group/item`}>
+                      <div className={`
+                        max-w-[90%] lg:max-w-[85%] 
+                        px-4 py-3 lg:px-7 lg:py-5 
+                        rounded-[1.5rem] lg:rounded-[2rem] 
+                        shadow-xl transition-all hover:scale-[1.01] relative
+                        ${e.sender === 'user' 
+                          ? 'bg-gradient-to-br from-[var(--theme-primary)] to-indigo-600 text-white' 
+                          : 'bg-white/[0.04] text-gray-200 border border-white/5 backdrop-blur-xl'
+                        }
+                      `}>
+                        {/* Quick Delete Trigger */}
+                        <button 
+                          onClick={() => deleteTranscription(e.id)}
+                          className={`absolute ${e.sender === 'user' ? '-left-8' : '-right-8'} top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-40 hover:!opacity-100 text-red-500 transition-all p-2 active:scale-90`}
+                        >
+                          <i className="fas fa-trash-alt text-xs lg:text-sm"></i>
+                        </button>
+
+                        <p className="text-sm lg:text-lg font-bold leading-relaxed whitespace-pre-wrap">{e.text}</p>
+                        {!isWearable && e.sources && <GroundingSources sources={e.sources} themePrimary={themeData.primary} />}
+                        <div className={`mt-2 text-[8px] opacity-40 uppercase font-black tracking-widest ${e.sender === 'user' ? 'text-right' : 'text-left'}`}>
+                          {new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </React.Fragment>
               ))}
               
               {(streamingAssistantText || state === AssistantState.THINKING) && (
