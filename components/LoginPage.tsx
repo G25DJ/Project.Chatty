@@ -94,7 +94,7 @@ const LoginPage = ({ onLogin }) => {
   const handleAgeCheck = (e) => {
     e.preventDefault();
     if (age === '' || parseInt(age) < 13) {
-      setError("Safety Protocol: 13+ only.");
+      setError("AGE RESTRICTED");
       return;
     }
     setError(null);
